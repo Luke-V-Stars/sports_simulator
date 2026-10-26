@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+/*
+  Color tokens. Every color on the site comes from this list, so light and
+  dark mode can each have their own values. "away" and "home" are the two
+  team colors used on every chart: the away team is always blue and the home
+  team is always orange (checked for color-blind readability).
+*/
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --surface-2: #f0efec;
+  --ink-1: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-muted: #6f6d68;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+  --away: #2a78d6;
+  --away-wash: rgba(42, 120, 214, 0.1);
+  --home: #eb6834;
+  --home-wash: rgba(235, 104, 52, 0.1);
+  --neutral-fill: #898781;
+  --good: #0ca30c;
+  --good-text: #006300;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --surface-2: #262624;
+    --ink-1: #f0efec;
+    --ink-2: #c3c2b7;
+    --ink-muted: #9a988f;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.1);
+    --away: #3987e5;
+    --away-wash: rgba(57, 135, 229, 0.14);
+    --home: #d95926;
+    --home-wash: rgba(217, 89, 38, 0.14);
+    --neutral-fill: #898781;
+    --good-text: #0ca30c;
+  }
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--ink-muted);
+  --color-line: var(--grid);
+  --color-axis: var(--axis);
+  --color-edge: var(--border);
+  --color-away: var(--away);
+  --color-away-wash: var(--away-wash);
+  --color-home: var(--home);
+  --color-home-wash: var(--home-wash);
+  --color-good: var(--good);
+  --color-good-text: var(--good-text);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--page);
+  color: var(--ink-1);
+}
+
+/* Numbers in table columns line up when every digit has the same width. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
