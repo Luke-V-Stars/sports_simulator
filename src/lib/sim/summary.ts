@@ -38,6 +38,8 @@ export interface SimSummary {
   overtimePct: number;
   meanMargin: number; // home minus away
   meanTotal: number;
+  marginRange: { low: number; high: number }; // 10th to 90th percentile
+  totalRange: { low: number; high: number };
   margins: { margin: number; pct: number }[]; // home minus away
   totals: { from: number; to: number; pct: number }[];
   likelyScores: { home: number; away: number; pct: number }[];
@@ -86,11 +88,13 @@ export function runSimulations(input: MatchupInput, runs: number, seed: number):
   }
 
   const margins = new Map<number, number>();
+  const marginList = new Int32Array(runs);
   const totals: number[] = [];
   let marginSum = 0;
   for (let r = 0; r < runs; r++) {
     const margin = homeScores[r] - awayScores[r];
     margins.set(margin, (margins.get(margin) ?? 0) + 1);
+    marginList[r] = margin;
     marginSum += margin;
     totals.push(homeScores[r] + awayScores[r]);
   }
@@ -103,6 +107,8 @@ export function runSimulations(input: MatchupInput, runs: number, seed: number):
     overtimePct: overtimeGames / runs,
     meanMargin: marginSum / runs,
     meanTotal: totals.reduce((a, b) => a + b, 0) / runs,
+    marginRange: typicalRange(marginList),
+    totalRange: typicalRange(Int32Array.from(totals)),
     margins: [...margins.entries()]
       .filter(([m]) => Math.abs(m) <= 45)
       .map(([margin, count]) => ({ margin, pct: count / runs }))
@@ -140,13 +146,16 @@ function percentile(sorted: ArrayLike<number>, p: number): number {
   return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 }
 
+function typicalRange(values: Int32Array): { low: number; high: number } {
+  const sorted = Int32Array.from(values).sort();
+  return { low: percentile(sorted, 0.1), high: percentile(sorted, 0.9) };
+}
+
 function teamProjection(scores: Int32Array, winPct: number): TeamProjection {
-  const sorted = Int32Array.from(scores).sort();
   return {
     winPct,
     mean: scores.reduce((a, b) => a + b, 0) / scores.length,
-    low: percentile(sorted, 0.1),
-    high: percentile(sorted, 0.9),
+    ...typicalRange(scores),
   };
 }
 

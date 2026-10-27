@@ -97,6 +97,14 @@ export interface GameDetails {
   injuries: Record<string, Injury[]>;
 }
 
+// What really happened in a finished game, to check the projections against.
+export interface ActualResult {
+  home: number; // final score
+  away: number;
+  // Real player lines (missing if ESPN has no box score for the game).
+  players?: { home: BoxScoreLine[]; away: BoxScoreLine[] };
+}
+
 // How strong a team is, in points compared with an average team.
 export interface TeamRating {
   teamId: string;

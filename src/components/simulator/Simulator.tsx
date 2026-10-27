@@ -6,14 +6,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { pct, marginText, roundHalf } from "@/lib/format";
+import { checkGame } from "@/lib/sim/compare";
 import { newSeed } from "@/lib/sim/random";
 import { playOneGame, runSimulations, type SimSummary, type SingleGame } from "@/lib/sim/summary";
 import type { MatchupInput } from "@/lib/sim/types";
-import type { VegasLine } from "@/lib/types";
+import type { ActualResult, VegasLine } from "@/lib/types";
 import { MarginChart } from "../charts/MarginChart";
 import { TotalsChart } from "../charts/TotalsChart";
 import { WinBar } from "../WinBar";
 import { PlayerTables } from "./PlayerTables";
+import { ResultCheck } from "./ResultCheck";
 import { SingleGamePanel } from "./SingleGamePanel";
 
 const RUN_OPTIONS = [1_000, 10_000, 50_000];
@@ -21,10 +23,10 @@ const RUN_OPTIONS = [1_000, 10_000, 50_000];
 interface Props {
   input: MatchupInput;
   vegas?: VegasLine;
-  finalScore?: { home: number; away: number };
+  actual?: ActualResult; // finished games: what really happened
 }
 
-export function Simulator({ input, vegas, finalScore }: Props) {
+export function Simulator({ input, vegas, actual }: Props) {
   const [runs, setRuns] = useState(10_000);
   const [summary, setSummary] = useState<SimSummary | null>(null);
   const [running, setRunning] = useState(false);
@@ -57,6 +59,7 @@ export function Simulator({ input, vegas, finalScore }: Props) {
 
   const home = input.home.team;
   const away = input.away.team;
+  const check = summary && actual ? checkGame(summary, actual, home.abbr, vegas) : undefined;
 
   return (
     <div className="flex flex-col gap-6">
@@ -119,27 +122,31 @@ export function Simulator({ input, vegas, finalScore }: Props) {
                 note={summary.tiePct > 0 ? `Ends in a tie: ${pct(summary.tiePct, 1)}` : undefined}
               />
             </div>
-            {finalScore && (
-              <p className="rounded-md bg-surface-2 px-3 py-2 text-sm">
-                <span className="font-semibold">Actual final: </span>
-                {away.abbr} {finalScore.away} – {home.abbr} {finalScore.home}. Before the game, the model gave{" "}
-                {finalScore.home > finalScore.away ? home.abbr : away.abbr} a{" "}
-                {pct(finalScore.home > finalScore.away ? summary.home.winPct : summary.away.winPct)} chance to win.
-              </p>
-            )}
           </section>
+
+          {check && <ResultCheck check={check} home={home} away={away} vegas={vegas} />}
 
           {/* Charts */}
           <div className="grid gap-6 lg:grid-cols-2">
             <section className="rounded-xl border border-edge bg-surface p-4">
               <h2 className="font-semibold">Margin of victory</h2>
               <p className="mb-3 text-sm text-ink-2">How often each final margin happened.</p>
-              <MarginChart league={input.league} margins={summary.margins} homeAbbr={home.abbr} awayAbbr={away.abbr} />
+              <MarginChart
+                league={input.league}
+                margins={summary.margins}
+                homeAbbr={home.abbr}
+                awayAbbr={away.abbr}
+                actualMargin={actual && actual.home - actual.away}
+              />
             </section>
             <section className="rounded-xl border border-edge bg-surface p-4">
               <h2 className="font-semibold">Combined points</h2>
               <p className="mb-3 text-sm text-ink-2">Both teams&apos; points added together.</p>
-              <TotalsChart totals={summary.totals} vegasTotal={vegas?.overUnder} />
+              <TotalsChart
+                totals={summary.totals}
+                vegasTotal={vegas?.overUnder}
+                actualTotal={actual && actual.home + actual.away}
+              />
             </section>
           </div>
 
@@ -184,7 +191,9 @@ export function Simulator({ input, vegas, finalScore }: Props) {
           {/* Player projections */}
           <section className="rounded-xl border border-edge bg-surface p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="font-semibold">Projected player stats</h2>
+              <h2 className="font-semibold">
+                {actual?.players ? "Projected vs. actual player stats" : "Projected player stats"}
+              </h2>
               <div className="flex overflow-hidden rounded-md border border-edge" role="tablist">
                 {(["away", "home"] as const).map((side) => (
                   <button
@@ -207,7 +216,11 @@ export function Simulator({ input, vegas, finalScore }: Props) {
                 ))}
               </div>
             </div>
-            <PlayerTables league={input.league} players={summary.players[playerSide]} />
+            <PlayerTables
+              league={input.league}
+              players={summary.players[playerSide]}
+              actual={actual?.players?.[playerSide]}
+            />
           </section>
         </div>
       )}

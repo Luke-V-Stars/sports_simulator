@@ -6,14 +6,25 @@ import { Bar, BarChart, CartesianGrid, ReferenceLine, Tooltip, XAxis, YAxis } fr
 import { pct } from "@/lib/format";
 import { axisStyle, niceTicks, TooltipBox } from "./ChartTooltip";
 
+type Bin = { from: number; to: number; pct: number };
+
 interface Props {
-  totals: { from: number; to: number; pct: number }[];
+  totals: Bin[];
   vegasTotal?: number;
+  actualTotal?: number; // finished games: the real combined points
 }
 
-export function TotalsChart({ totals, vegasTotal }: Props) {
-  const data = totals.map((t) => ({ label: `${t.from}–${t.to}`, from: t.from, to: t.to, pct: t.pct * 100 }));
-  const vegasBin = vegasTotal ? data.find((d) => vegasTotal >= d.from && vegasTotal < d.to + 1) : undefined;
+export function TotalsChart({ totals, vegasTotal, actualTotal }: Props) {
+  const data = withRoomFor(totals, actualTotal).map((t) => ({
+    label: `${t.from}–${t.to}`,
+    from: t.from,
+    to: t.to,
+    pct: t.pct * 100,
+  }));
+  const binOf = (value?: number) =>
+    value === undefined ? undefined : data.find((d) => value >= d.from && value < d.to + 1);
+  const vegasBin = vegasTotal ? binOf(vegasTotal) : undefined;
+  const actualBin = binOf(actualTotal);
   const yTicks = niceTicks(Math.max(...data.map((d) => d.pct)));
   return (
     <div className="flex flex-col gap-2">
@@ -22,7 +33,8 @@ export function TotalsChart({ totals, vegasTotal }: Props) {
         style={{ width: "100%", height: 240 }}
         data={data}
         barCategoryGap={2}
-        margin={{ top: 20, right: 8, bottom: 0, left: 0 }}
+        // Both labels sit above the chart, one higher than the other, so they never overlap.
+        margin={{ top: vegasBin && actualBin ? 36 : 20, right: 8, bottom: 0, left: 0 }}
       >
         <CartesianGrid vertical={false} stroke="var(--grid)" />
         <XAxis dataKey="label" interval="preserveStartEnd" minTickGap={16} {...axisStyle} />
@@ -42,14 +54,28 @@ export function TotalsChart({ totals, vegasTotal }: Props) {
             return <TooltipBox value={pct(row.pct / 100, 1)} label={`${row.label} combined points`} />;
           }}
         />
+        <Bar dataKey="pct" fill="var(--neutral-fill)" radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false} />
         {vegasBin && (
           <ReferenceLine
             x={vegasBin.label}
             stroke="var(--ink-2)"
-            label={{ value: `Vegas O/U ${vegasTotal}`, position: "top", fill: "var(--ink-2)", fontSize: 12 }}
+            label={{
+              value: `Vegas O/U ${vegasTotal}`,
+              position: "top",
+              offset: actualBin ? 20 : 5,
+              fill: "var(--ink-2)",
+              fontSize: 12,
+            }}
           />
         )}
-        <Bar dataKey="pct" fill="var(--neutral-fill)" radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false} />
+        {actualBin && (
+          <ReferenceLine
+            x={actualBin.label}
+            stroke="var(--ink-1)"
+            strokeWidth={2}
+            label={{ value: `Actual ${actualTotal}`, position: "top", fill: "var(--ink-1)", fontSize: 12 }}
+          />
+        )}
       </BarChart>
       <details className="px-2 text-sm">
         <summary className="cursor-pointer text-ink-2">Show as table</summary>
@@ -72,4 +98,16 @@ export function TotalsChart({ totals, vegasTotal }: Props) {
       </details>
     </div>
   );
+}
+
+// If the real total fell outside every simulated bin, add empty bins out to
+// it so the "Actual" line still has a place on the chart.
+function withRoomFor(totals: Bin[], value?: number): Bin[] {
+  if (value === undefined || totals.length === 0) return totals;
+  const width = totals[0].to - totals[0].from + 1;
+  const target = Math.floor(value / width) * width;
+  const bins = [...totals];
+  for (let from = bins[0].from - width; from >= target; from -= width) bins.unshift({ from, to: from + width - 1, pct: 0 });
+  for (let from = bins.at(-1)!.from + width; from <= target; from += width) bins.push({ from, to: from + width - 1, pct: 0 });
+  return bins;
 }

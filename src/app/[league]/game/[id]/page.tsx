@@ -23,15 +23,11 @@ async function GameContent({ params }: Pick<PageProps<"/[league]/game/[id]">, "p
   if (!isLeagueId(league) || !/^\d+$/.test(id)) notFound();
   const data = await getMatchup(league, id);
   const { game } = data;
-  const final =
-    game.state === "post" && game.home.score !== null && game.away.score !== null
-      ? { home: game.home.score, away: game.away.score }
-      : undefined;
 
   return (
     <main className="flex flex-col gap-6">
       <MatchupHeader data={data} />
-      <Simulator input={data.input} vegas={game.vegas} finalScore={final} />
+      <Simulator input={data.input} vegas={game.vegas} actual={data.actual} />
       <div className="grid gap-6 lg:grid-cols-2">
         <TeamComparison data={data} />
         <InjuryReport data={data} />

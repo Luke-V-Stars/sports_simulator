@@ -2,7 +2,7 @@
 
 import { getGameDetails, getRoster, mapLimit } from "../espn";
 import { LEAGUES, type LeagueId } from "../leagues";
-import type { Game, Injury, TeamRating, TeamSeasonStats } from "../types";
+import type { ActualResult, Game, GameDetails, Injury, TeamRating, TeamSeasonStats } from "../types";
 import type { MatchupInput } from "../sim/types";
 import { getLeagueSnapshot, powerRanks, type LeagueSnapshot } from "./league";
 import { buildSide, type SampleGame } from "./players";
@@ -23,6 +23,7 @@ export interface MatchupData {
   away: TeamContext;
   teamCount: number;
   leagueAverage: number;
+  actual?: ActualResult; // only for finished games
 }
 
 export async function getMatchup(league: LeagueId, eventId: string): Promise<MatchupData> {
@@ -72,6 +73,19 @@ export async function getMatchup(league: LeagueId, eventId: string): Promise<Mat
     away: away.context,
     teamCount: snapshot.teams.length,
     leagueAverage: snapshot.ratings.leagueAverage,
+    actual: actualResult(details),
+  };
+}
+
+// The real final score and box score, once the game is over.
+function actualResult({ game, boxScore }: GameDetails): ActualResult | undefined {
+  if (!game.completed || game.home.score === null || game.away.score === null) return undefined;
+  const home = boxScore[game.home.team.id] ?? [];
+  const away = boxScore[game.away.team.id] ?? [];
+  return {
+    home: game.home.score,
+    away: game.away.score,
+    players: home.length && away.length ? { home, away } : undefined,
   };
 }
 

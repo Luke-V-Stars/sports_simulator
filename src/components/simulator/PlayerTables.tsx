@@ -1,11 +1,15 @@
 "use client";
 
-// Projected stat lines for every player, from the simulations.
+// Projected stat lines for every player, from the simulations. For finished
+// games, each projection also shows what the player really did.
 
 import { pct } from "@/lib/format";
 import { LEAGUES, type LeagueId, type StatDef } from "@/lib/leagues";
+import { checkRange } from "@/lib/sim/compare";
 import type { PlayerProjection } from "@/lib/sim/summary";
+import type { BoxScoreLine } from "@/lib/types";
 import { InjuryBadge } from "../InjuryBadge";
+import { RangeMark } from "./ResultCheck";
 
 interface Group {
   title: string;
@@ -30,18 +34,52 @@ const NBA_GROUPS: Group[] = [
   },
 ];
 
-export function PlayerTables({ league, players }: { league: LeagueId; players: PlayerProjection[] }) {
+interface Props {
+  league: LeagueId;
+  players: PlayerProjection[];
+  actual?: BoxScoreLine[]; // finished games: this team's real box score
+}
+
+export function PlayerTables({ league, players, actual }: Props) {
   const defs = new Map(LEAGUES[league].playerStats.map((s) => [s.key, s]));
   const groups = league === "nfl" ? NFL_GROUPS : NBA_GROUPS;
   const sittingOut = players.filter((p) => p.playPct === 0);
+  const tables = groups.map((group) => ({
+    group,
+    rows: players
+      .filter((p) => p.playPct > 0 && group.include(p))
+      .sort((a, b) => b.stats[group.keys[0]].mean - a.stats[group.keys[0]].mean)
+      .slice(0, group.limit),
+  }));
+
+  const actualById = actual && new Map(actual.map((line) => [line.playerId, line]));
+  // NBA box scores list everyone who played; NFL ones only list players with stats.
+  const missingLabel = league === "nba" ? "DNP" : "–";
+
+  // How many of the shown stats landed inside the projected range.
+  let inside = 0;
+  let checked = 0;
+  for (const { group, rows } of tables) {
+    for (const p of rows) {
+      const line = actualById?.get(p.id);
+      if (!line) continue;
+      for (const key of group.keys) {
+        checked++;
+        if (checkRange(line.stats[key] ?? 0, p.stats[key].low, p.stats[key].high) === "inside") inside++;
+      }
+    }
+  }
+
+  // Players who really played but weren't in the projection (or were expected to sit).
+  const projected = new Set(players.filter((p) => p.playPct > 0).map((p) => p.id));
+  const surprises = (actual ?? [])
+    .filter((line) => !projected.has(line.playerId))
+    .map((line) => ({ name: line.name, note: surpriseNote(league, line) }))
+    .filter((s) => s.note);
 
   return (
     <div className="flex flex-col gap-5">
-      {groups.map((group) => {
-        const rows = players
-          .filter((p) => p.playPct > 0 && group.include(p))
-          .sort((a, b) => b.stats[group.keys[0]].mean - a.stats[group.keys[0]].mean)
-          .slice(0, group.limit);
+      {tables.map(({ group, rows }) => {
         if (rows.length === 0) return null;
         return (
           <div key={group.title} className="overflow-x-auto">
@@ -61,22 +99,31 @@ export function PlayerTables({ league, players }: { league: LeagueId; players: P
                 </tr>
               </thead>
               <tbody>
-                {rows.map((p) => (
-                  <tr key={p.id} className="border-b border-line last:border-0">
-                    <td className="py-1.5 pr-2">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-medium">{p.name}</span>
-                        <span className="text-xs text-muted">{p.position}</span>
-                        {p.injury && <InjuryBadge status={p.injury.status} />}
-                        {p.replacement && <span className="text-xs text-muted">(fills in if the starter sits)</span>}
-                      </div>
-                    </td>
-                    <td className="px-2 py-1.5 text-right text-ink-2">{pct(p.playPct)}</td>
-                    {group.keys.map((key) => (
-                      <StatCell key={key} def={defs.get(key)!} stat={p.stats[key]} />
-                    ))}
-                  </tr>
-                ))}
+                {rows.map((p) => {
+                  const line = actualById?.get(p.id);
+                  return (
+                    <tr key={p.id} className="border-b border-line last:border-0">
+                      <td className="py-1.5 pr-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-medium">{p.name}</span>
+                          <span className="text-xs text-muted">{p.position}</span>
+                          {p.injury && <InjuryBadge status={p.injury.status} />}
+                          {p.replacement && <span className="text-xs text-muted">(fills in if the starter sits)</span>}
+                        </div>
+                      </td>
+                      <td className="px-2 py-1.5 text-right text-ink-2">{pct(p.playPct)}</td>
+                      {group.keys.map((key) => (
+                        <StatCell
+                          key={key}
+                          def={defs.get(key)!}
+                          stat={p.stats[key]}
+                          actual={actualById ? (line ? (line.stats[key] ?? 0) : null) : undefined}
+                          missingLabel={missingLabel}
+                        />
+                      ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -88,20 +135,65 @@ export function PlayerTables({ league, players }: { league: LeagueId; players: P
           {sittingOut.map((p) => `${p.name} (${p.injury?.status ?? "inactive"})`).join(", ")}
         </p>
       )}
+      {surprises.length > 0 && (
+        <p className="text-sm text-ink-2">
+          <span className="font-medium text-ink">Played, but not in the projection: </span>
+          {surprises.map((s) => `${s.name} (${s.note})`).join(", ")}
+        </p>
+      )}
+      {actualById && checked > 0 && (
+        <p className="text-sm">
+          <span className="font-semibold">{inside} of {checked} </span>
+          real stats ({pct(inside / checked)}) landed inside the projected range. If the ranges are about right, that
+          should happen roughly 8 times in 10.
+        </p>
+      )}
       <p className="text-xs text-muted">
         Big number = average when he plays. Small numbers = a quiet game to a big game (10th to 90th percentile).
+        {actualById && (
+          <>
+            {" "}
+            Bottom number = what really happened: <RangeMark range="inside" /> inside the range,{" "}
+            <RangeMark range="above" /> above it, <RangeMark range="below" /> below it.{" "}
+            {league === "nba" ? "DNP = did not play." : "– = no stats in the real box score."}
+          </>
+        )}
       </p>
     </div>
   );
 }
 
-function StatCell({ def, stat }: { def: StatDef; stat: { mean: number; low: number; high: number } }) {
+// actual: undefined = nothing to compare yet; null = he isn't in the real box score.
+function StatCell({
+  def,
+  stat,
+  actual,
+  missingLabel,
+}: {
+  def: StatDef;
+  stat: { mean: number; low: number; high: number };
+  actual?: number | null;
+  missingLabel: string;
+}) {
   return (
     <td className="px-2 py-1.5 text-right">
       <div className="font-medium">{stat.mean.toFixed(def.decimals)}</div>
       <div className="text-[11px] text-muted">
         {stat.low.toFixed(0)}–{stat.high.toFixed(0)}
       </div>
+      {actual === null && <div className="text-[11px] text-muted">{missingLabel}</div>}
+      {actual !== null && actual !== undefined && (
+        <div className="text-[11px] font-semibold">
+          <RangeMark range={checkRange(actual, stat.low, stat.high)} /> {actual}
+        </div>
+      )}
     </td>
   );
+}
+
+// "24 PTS" / "61 yds", or nothing if he barely played.
+function surpriseNote(league: LeagueId, line: BoxScoreLine): string | undefined {
+  if (league === "nba") return (line.stats.min ?? 0) >= 10 ? `${line.stats.pts ?? 0} PTS` : undefined;
+  const yards = (line.stats.passYds ?? 0) + (line.stats.rushYds ?? 0) + (line.stats.recYds ?? 0);
+  return yards >= 20 ? `${yards} yds` : undefined;
 }

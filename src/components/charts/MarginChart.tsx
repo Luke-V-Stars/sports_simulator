@@ -3,7 +3,17 @@
 // How often each final margin happened across all the simulations.
 // Bars on the left are away-team wins (blue), on the right home-team wins (orange).
 
-import { Bar, BarChart, CartesianGrid, Rectangle, Tooltip, XAxis, YAxis, type BarShapeProps } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Rectangle,
+  ReferenceLine,
+  Tooltip,
+  XAxis,
+  YAxis,
+  type BarShapeProps,
+} from "recharts";
 import { pct } from "@/lib/format";
 import type { LeagueId } from "@/lib/leagues";
 import { axisStyle, LegendSwatch, niceTicks, TooltipBox } from "./ChartTooltip";
@@ -13,12 +23,13 @@ interface Props {
   margins: { margin: number; pct: number }[];
   homeAbbr: string;
   awayAbbr: string;
+  actualMargin?: number; // finished games: the real home-minus-away margin
 }
 
-export function MarginChart({ league, margins, homeAbbr, awayAbbr }: Props) {
+export function MarginChart({ league, margins, homeAbbr, awayAbbr, actualMargin }: Props) {
   const step = league === "nfl" ? 7 : 10;
   const seen = margins.filter((m) => m.pct >= 0.001).map((m) => Math.abs(m.margin));
-  const range = Math.ceil(Math.max(step, ...seen) / step) * step;
+  const range = Math.ceil(Math.max(step, ...seen, Math.abs(actualMargin ?? 0)) / step) * step;
   const byMargin = new Map(margins.map((m) => [m.margin, m.pct]));
   const data = [];
   for (let m = -range; m <= range; m++) data.push({ margin: m, pct: (byMargin.get(m) ?? 0) * 100 });
@@ -34,7 +45,7 @@ export function MarginChart({ league, margins, homeAbbr, awayAbbr }: Props) {
         style={{ width: "100%", height: 240 }}
         data={data}
         barCategoryGap={1}
-        margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+        margin={{ top: actualMargin === undefined ? 8 : 20, right: 8, bottom: 0, left: 0 }}
       >
         <CartesianGrid vertical={false} stroke="var(--grid)" />
         <XAxis dataKey="margin" interval={step - 1} tickFormatter={(m: number) => String(Math.abs(m))} {...axisStyle} />
@@ -64,6 +75,14 @@ export function MarginChart({ league, margins, homeAbbr, awayAbbr }: Props) {
             return <Rectangle {...props} fill={fill} radius={[4, 4, 0, 0]} />;
           }}
         />
+        {actualMargin !== undefined && (
+          <ReferenceLine
+            x={actualMargin}
+            stroke="var(--ink-1)"
+            strokeWidth={2}
+            label={{ value: "Actual", position: "top", fill: "var(--ink-1)", fontSize: 12 }}
+          />
+        )}
       </BarChart>
       <div className="flex items-center justify-between px-10 text-xs text-muted">
         <span>← {awayAbbr} wins by</span>
