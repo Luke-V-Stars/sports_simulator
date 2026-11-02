@@ -26,10 +26,13 @@ export default function HowItWorks() {
         home team (about 1.8 points in the NFL and 2.4 in the NBA, split between the teams).
       </Step>
 
-      <Step n={4} title="Account for injuries">
+      <Step n={4} title="Decide who plays">
         Each simulated game first decides who plays. &quot;Out&quot; players never do; &quot;Questionable&quot; players
-        play about half the time. When an important player sits, his team&apos;s expected points drop (a starting NFL
-        quarterback is worth about 6 points) and his usual production is handed to teammates who did play.
+        play about half the time. Bench players get in about as often as they have lately: an NBA player the coach
+        kept on the bench in 3 of the last 10 games plays in about 70% of simulations. Only one NFL quarterback plays:
+        the highest healthy one on ESPN&apos;s depth chart. When an important player is injured, his team&apos;s
+        expected points drop (a starting NFL quarterback is worth about 6 points) and his usual production is handed
+        to teammates who did play.
       </Step>
 
       <Step n={5} title="Play the game, thousands of times">

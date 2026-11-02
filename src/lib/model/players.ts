@@ -6,6 +6,7 @@ import type { PlayerInput, SideInput } from "../sim/types";
 
 export interface SampleGame {
   lines: BoxScoreLine[]; // this team's player lines from that game
+  benched: string[]; // NBA: healthy players who didn't get in
   teamPoints: number;
   weight: number; // this season = 1, last season = less
 }
@@ -29,30 +30,35 @@ export function buildSide(args: {
   expectedPoints: number;
   sample: SampleGame[];
   roster: RosterPlayer[];
+  depth: Record<string, number>; // NFL depth chart spots (empty for NBA)
   injuries: Injury[];
 }): SideInput {
-  const { league, team, expectedPoints, sample, roster, injuries } = args;
+  const { league, team, expectedPoints, sample, roster, depth, injuries } = args;
   const totalWeight = sample.reduce((sum, g) => sum + g.weight, 0) || 1;
 
   // Add up every stat, per player and for the whole team.
   const teamSums: Record<string, number> = {};
-  const players = new Map<string, { line: BoxScoreLine; weight: number; sums: Record<string, number> }>();
+  const players = new Map<
+    string,
+    { line: BoxScoreLine; weight: number; games: number[]; sums: Record<string, number> }
+  >();
   let pointSum = 0;
-  for (const game of sample) {
+  sample.forEach((game, g) => {
     pointSum += game.weight * game.teamPoints;
     for (const line of game.lines) {
       let p = players.get(line.playerId);
       if (!p) {
-        p = { line, weight: 0, sums: {} };
+        p = { line, weight: 0, games: [], sums: {} };
         players.set(line.playerId, p);
       }
       p.weight += game.weight;
+      p.games.push(g);
       for (const [key, value] of Object.entries(line.stats)) {
         p.sums[key] = (p.sums[key] ?? 0) + game.weight * value;
         teamSums[key] = (teamSums[key] ?? 0) + game.weight * value;
       }
     }
-  }
+  });
   const teamAvg: Record<string, number> = {};
   for (const [key, sum] of Object.entries(teamSums)) teamAvg[key] = sum / totalWeight;
 
@@ -69,21 +75,24 @@ export function buildSide(args: {
 
     const injury = injuryById.get(id);
     const playProb = injury ? playChance(injury.status) : rosterEntry.unavailable ? 0 : 1;
-    const appearanceRate = p.weight / totalWeight;
+    const position = rosterEntry.position ?? p.line.position;
+    const role = rolePct(league, sample, p.games, id, position, depth[id]);
     inputs.push({
       id,
       name: rosterEntry.name ?? p.line.name,
-      position: rosterEntry.position ?? p.line.position,
+      position,
       headshot: rosterEntry.headshot ?? p.line.headshot,
       playProb,
+      rolePct: role,
+      depth: depth[id],
       injury: injury ? { status: injury.status, detail: injury.detail } : undefined,
-      gamesPlayed: countGames(sample, id),
+      gamesPlayed: p.games.length,
       avg,
-      impact: playerImpact(league, avg, teamAvg) * appearanceRate,
+      impact: playerImpact(league, avg, teamAvg) * role,
     });
   }
 
-  if (league === "nfl") inputs.push(backupQuarterback(team, roster, inputs, injuryById, teamAvg));
+  if (league === "nfl") inputs.push(backupQuarterback(team, roster, depth, inputs, injuryById, teamAvg));
 
   inputs.sort((a, b) => importance(league, b) - importance(league, a));
 
@@ -100,8 +109,32 @@ export function buildSide(args: {
   };
 }
 
-function countGames(sample: SampleGame[], playerId: string): number {
-  return sample.filter((g) => g.lines.some((l) => l.playerId === playerId)).length;
+// How often a healthy player gets into the game. His averages only count the
+// games he played, so without this a backup who had one big game would be
+// treated like an every-game player.
+//   NBA: games played vs. games the coach kept him on the bench. Games he
+//        missed injured don't count against him.
+//   NFL: box scores don't say why someone is missing, so depth-chart starters
+//        (and quarterbacks, picked by depth chart in the engine) count as every
+//        game. Everyone else: share of games since his first one in the sample,
+//        so a player who just arrived isn't marked down for games before that.
+function rolePct(
+  league: LeagueId,
+  sample: SampleGame[],
+  games: number[], // indexes into sample (newest first) where he played
+  id: string,
+  position: string | undefined,
+  depth: number | undefined,
+): number {
+  const played = games.reduce((sum, g) => sum + sample[g].weight, 0);
+  if (league === "nba") {
+    const benched = sample.reduce((sum, g) => sum + (g.benched.includes(id) ? g.weight : 0), 0);
+    return played / (played + benched);
+  }
+  if (depth === 1 || position === "QB") return 1;
+  const firstGame = Math.max(...games);
+  const possible = sample.slice(0, firstGame + 1).reduce((sum, g) => sum + g.weight, 0);
+  return played / possible;
 }
 
 // Skip players who barely see the field.
@@ -130,22 +163,27 @@ function importance(league: LeagueId, p: PlayerInput): number {
 function backupQuarterback(
   team: Team,
   roster: RosterPlayer[],
+  depth: Record<string, number>,
   players: PlayerInput[],
   injuries: Map<string, Injury>,
   teamAvg: Record<string, number>,
 ): PlayerInput {
   const known = new Set(players.map((p) => p.id));
-  const backup = roster.find((r) => {
-    const injury = injuries.get(r.id);
-    const healthy = !r.unavailable && (!injury || playChance(injury.status) > 0);
-    return r.position === "QB" && !known.has(r.id) && healthy;
-  });
+  const backup = roster
+    .filter((r) => {
+      const injury = injuries.get(r.id);
+      const healthy = !r.unavailable && (!injury || playChance(injury.status) > 0);
+      return r.position === "QB" && !known.has(r.id) && healthy;
+    })
+    .sort((a, b) => (depth[a.id] ?? 99) - (depth[b.id] ?? 99))[0];
   return {
     id: backup?.id ?? `${team.id}-backup-qb`,
     name: backup?.name ?? "Backup QB",
     position: "QB",
     headshot: backup?.headshot,
     playProb: 1,
+    rolePct: 1,
+    depth: backup && depth[backup.id],
     gamesPlayed: 0,
     avg: { passAtt: 30, int: teamAvg.int ?? 0.8, rushYds: 5 },
     impact: 0,

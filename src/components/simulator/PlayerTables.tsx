@@ -43,7 +43,8 @@ interface Props {
 export function PlayerTables({ league, players, actual }: Props) {
   const defs = new Map(LEAGUES[league].playerStats.map((s) => [s.key, s]));
   const groups = league === "nfl" ? NFL_GROUPS : NBA_GROUPS;
-  const sittingOut = players.filter((p) => p.playPct === 0);
+  // Healthy backups who never got in (e.g. the No. 2 QB) aren't listed.
+  const sittingOut = players.filter((p) => p.out);
   const tables = groups.map((group) => ({
     group,
     rows: players

@@ -93,6 +93,8 @@ export interface GameDetails {
   game: Game;
   // Player lines for each team, keyed by team id (empty before the game).
   boxScore: Record<string, BoxScoreLine[]>;
+  // NBA: ids of healthy players the coach kept on the bench, keyed by team id.
+  benched: Record<string, string[]>;
   // Injury report for each team, keyed by team id.
   injuries: Record<string, Injury[]>;
 }

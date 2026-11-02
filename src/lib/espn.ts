@@ -94,7 +94,7 @@ interface RawAthlete {
 interface RawBoxCategory {
   name?: string;
   keys: string[];
-  athletes: { athlete: RawAthlete; stats: string[]; didNotPlay?: boolean }[];
+  athletes: { athlete: RawAthlete; stats: string[]; didNotPlay?: boolean; reason?: string }[];
 }
 
 interface RawSummary {
@@ -314,9 +314,11 @@ export async function getGameDetails(league: LeagueId, eventId: string): Promise
   game.vegas = parseVegas(data.pickcenter?.[0]) ?? game.vegas;
 
   const boxScore: Record<string, BoxScoreLine[]> = {};
+  const benched: Record<string, string[]> = {};
   for (const teamBox of data.boxscore?.players ?? []) {
     boxScore[teamBox.team.id] =
       league === "nba" ? parseNbaBox(teamBox.statistics) : parseNflBox(teamBox.statistics);
+    benched[teamBox.team.id] = league === "nba" ? coachBenched(teamBox.statistics) : [];
   }
 
   const injuries: Record<string, Injury[]> = {};
@@ -333,7 +335,7 @@ export async function getGameDetails(league: LeagueId, eventId: string): Promise
   // A finished game's box score never changes.
   if (game.completed) cacheLife("max");
   else cacheLife("minutes");
-  return { game, boxScore, injuries };
+  return { game, boxScore, benched, injuries };
 }
 
 // "Hamstring" + "Strain" -> "Hamstring – Strain"; drops "Not Specified" and repeats.
@@ -378,6 +380,14 @@ function parseNbaBox(categories: RawBoxCategory[]): BoxScoreLine[] {
     });
   }
   return lines;
+}
+
+// NBA box scores list healthy players who sat as "DNP - Coach's Decision".
+// Injured players are either missing or have the injury as the reason.
+function coachBenched(categories: RawBoxCategory[]): string[] {
+  return (categories[0]?.athletes ?? [])
+    .filter((a) => a.didNotPlay && /coach/i.test(a.reason ?? ""))
+    .map((a) => a.athlete.id);
 }
 
 // NFL box scores are split into categories (passing, rushing, receiving...).
@@ -453,4 +463,24 @@ export async function getRoster(league: LeagueId, teamId: string): Promise<Roste
     }
   }
   return players;
+}
+
+// NFL depth chart: each player's best spot at QB, RB, WR or TE
+// (1 = starter, 2 = first backup...), keyed by player id.
+export async function getDepthChart(league: LeagueId, teamId: string): Promise<Record<string, number>> {
+  "use cache";
+  cacheLife("hours");
+  const data = await espnJson<{ depthchart?: { positions: Record<string, { athletes: { id: string }[] }> }[] }>(
+    `${BASE}/${LEAGUES[league].espnPath}/teams/${teamId}/depthcharts`,
+  );
+  const depth: Record<string, number> = {};
+  for (const chart of data.depthchart ?? []) {
+    for (const [position, { athletes }] of Object.entries(chart.positions)) {
+      if (!/^(qb|rb|wr\d*|te)$/.test(position)) continue; // "wr1", "wr2"...
+      athletes.forEach((a, i) => {
+        depth[a.id] = Math.min(depth[a.id] ?? i + 1, i + 1);
+      });
+    }
+  }
+  return depth;
 }

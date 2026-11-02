@@ -1,6 +1,6 @@
 // Gathers everything the game page needs for one matchup.
 
-import { getGameDetails, getRoster, mapLimit } from "../espn";
+import { getDepthChart, getGameDetails, getRoster, mapLimit } from "../espn";
 import { LEAGUES, type LeagueId } from "../leagues";
 import type { ActualResult, Game, GameDetails, Injury, TeamRating, TeamSeasonStats } from "../types";
 import type { MatchupInput } from "../sim/types";
@@ -38,9 +38,11 @@ export async function getMatchup(league: LeagueId, eventId: string): Promise<Mat
     (["home", "away"] as const).map(async (side) => {
       const team = game[side].team;
       const injuries = details.injuries[team.id] ?? [];
-      const [sample, roster] = await Promise.all([
+      const [sample, roster, depth] = await Promise.all([
         loadSample(league, team.id, snapshot),
         getRoster(league, team.id),
+        // Nice to have: without it we fall back to box-score usage.
+        league === "nfl" ? getDepthChart(league, team.id).catch(() => ({})) : {},
       ]);
       const input = buildSide({
         league,
@@ -48,6 +50,7 @@ export async function getMatchup(league: LeagueId, eventId: string): Promise<Mat
         expectedPoints: expected[side],
         sample,
         roster,
+        depth,
         injuries,
       });
       const context: TeamContext = {
@@ -106,10 +109,16 @@ async function loadSample(league: LeagueId, teamId: string, snapshot: LeagueSnap
     ...previous.map((game) => ({ game, weight: 0.5 })),
   ];
   const sample = await mapLimit(chosen, 6, async ({ game, weight }) => {
-    const box = await getGameDetails(league, game.id);
+    const box = await getGameDetails(league, game.id).catch(() => undefined);
+    if (!box) return { lines: [], benched: [], teamPoints: 0, weight }; // ESPN lost this one
     const side = game.home.team.id === teamId ? game.home : game.away;
-    return { lines: box.boxScore[teamId] ?? [], teamPoints: side.score ?? 0, weight };
+    return {
+      lines: box.boxScore[teamId] ?? [],
+      benched: box.benched?.[teamId] ?? [], // missing in box scores cached before this field existed
+      teamPoints: side.score ?? 0,
+      weight,
+    };
   });
-  // Ignore any game ESPN has no box score for.
+  // Ignore any game ESPN has no box score for (or won't send at all).
   return sample.filter((g) => g.lines.length > 0);
 }

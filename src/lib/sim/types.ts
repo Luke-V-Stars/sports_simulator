@@ -11,6 +11,11 @@ export interface PlayerInput {
   headshot?: string;
   // Chance the player suits up (from the injury report): 1 = healthy, 0 = out.
   playProb: number;
+  // Chance he gets into the game when healthy, from how often he has lately
+  // (1 = every game; a deep-bench player might be 0.3).
+  rolePct: number;
+  // NFL depth chart spot: 1 = starter, 2 = first backup... (if listed).
+  depth?: number;
   injury?: { status: string; detail?: string };
   gamesPlayed: number; // games in our sample that he played in
   // His per-game averages when he plays. Keys match LEAGUES[league].playerStats

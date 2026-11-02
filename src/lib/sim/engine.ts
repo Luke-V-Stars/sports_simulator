@@ -1,9 +1,10 @@
 // Plays ONE simulated game. summary.ts calls this thousands of times.
 //
 // Each simulated game:
-//   1. decides which injured players suit up (a "questionable" player plays
-//      about half the time),
-//   2. lowers a team's expected points for each important player who sits,
+//   1. decides who plays: injured players suit up by their injury status (a
+//      "questionable" player plays about half the time), bench players get in
+//      as often as they have lately, and only one NFL quarterback plays,
+//   2. lowers a team's expected points for each important player who's hurt,
 //   3. produces a final score with realistic randomness,
 //   4. splits the team's points, yards, rebounds, etc. among the players who
 //      played, based on each player's recent share.
@@ -35,14 +36,22 @@ export function playGame(input: MatchupInput, rng: Rng): GameResult {
 
 // ---------- Shared ----------
 
-function sampleActive(side: SideInput, rng: Rng): boolean[] {
-  return side.players.map((p) => !p.replacement && rng() < p.playProb);
+interface Lineup {
+  active: boolean[]; // active[i]: does players[i] play?
+  hurt: boolean[]; // hurt[i]: is players[i] sitting out injured?
 }
 
-function injuryPenalty(side: SideInput, active: boolean[], cap: number): number {
+function sampleLineup(side: SideInput, rng: Rng): Lineup {
+  const hurt = side.players.map((p) => !p.replacement && rng() >= p.playProb);
+  const active = side.players.map((p, i) => !p.replacement && !hurt[i] && rng() < p.rolePct);
+  return { active, hurt };
+}
+
+// Only injuries cost points: a bench player not getting in is normal.
+function injuryPenalty(side: SideInput, hurt: boolean[], cap: number): number {
   let penalty = 0;
   side.players.forEach((p, i) => {
-    if (!active[i] && !p.replacement) penalty += p.impact;
+    if (hurt[i]) penalty += p.impact;
   });
   return Math.min(cap, penalty);
 }
@@ -79,10 +88,10 @@ const NBA_KEYS = LEAGUES.nba.playerStats.map((s) => s.key);
 const NBA_SWING: Record<string, number> = { min: 0, pts: 0.3, reb: 0.3, ast: 0.35, fg3: 0.5, stl: 0.6, blk: 0.6 };
 
 function playNba(input: MatchupInput, rng: Rng): GameResult {
-  const homeActive = sampleActive(input.home, rng);
-  const awayActive = sampleActive(input.away, rng);
-  const homeExpected = Math.max(80, input.home.expectedPoints - injuryPenalty(input.home, homeActive, 12));
-  const awayExpected = Math.max(80, input.away.expectedPoints - injuryPenalty(input.away, awayActive, 12));
+  const homeLineup = sampleLineup(input.home, rng);
+  const awayLineup = sampleLineup(input.away, rng);
+  const homeExpected = Math.max(80, input.home.expectedPoints - injuryPenalty(input.home, homeLineup.hurt, 12));
+  const awayExpected = Math.max(80, input.away.expectedPoints - injuryPenalty(input.away, awayLineup.hurt, 12));
 
   // A fast-paced game raises both scores together.
   const pace = 1 + 0.035 * normal(rng);
@@ -102,8 +111,8 @@ function playNba(input: MatchupInput, rng: Rng): GameResult {
   }
 
   return {
-    home: nbaBox(input.home, homeActive, home, homeExpected, overtimes, rng),
-    away: nbaBox(input.away, awayActive, away, awayExpected, overtimes, rng),
+    home: nbaBox(input.home, homeLineup.active, home, homeExpected, overtimes, rng),
+    away: nbaBox(input.away, awayLineup.active, away, awayExpected, overtimes, rng),
     overtimes,
     tie: false,
   };
@@ -155,10 +164,10 @@ function isQuarterback(p: PlayerInput): boolean {
 }
 
 function playNfl(input: MatchupInput, rng: Rng): GameResult {
-  const homeActive = nflActive(input.home, rng);
-  const awayActive = nflActive(input.away, rng);
-  const homeExpected = Math.max(6, input.home.expectedPoints - injuryPenalty(input.home, homeActive, 9));
-  const awayExpected = Math.max(6, input.away.expectedPoints - injuryPenalty(input.away, awayActive, 9));
+  const homeLineup = nflLineup(input.home, rng);
+  const awayLineup = nflLineup(input.away, rng);
+  const homeExpected = Math.max(6, input.home.expectedPoints - injuryPenalty(input.home, homeLineup.hurt, 9));
+  const awayExpected = Math.max(6, input.away.expectedPoints - injuryPenalty(input.away, awayLineup.hurt, 9));
 
   // NFL scoring comes in chunks (touchdowns and field goals), so instead of a
   // bell curve we play out ~11 possessions per team.
@@ -186,21 +195,30 @@ function playNfl(input: MatchupInput, rng: Rng): GameResult {
   }
 
   return {
-    home: nflBox(input.home, homeActive, home, rng),
-    away: nflBox(input.away, awayActive, away, rng),
+    home: nflBox(input.home, homeLineup.active, home, rng),
+    away: nflBox(input.away, awayLineup.active, away, rng),
     overtimes,
     tie,
   };
 }
 
-function nflActive(side: SideInput, rng: Rng): boolean[] {
-  const active = sampleActive(side, rng);
-  const hasQb = side.players.some((p, i) => active[i] && isQuarterback(p));
-  if (!hasQb) {
-    const backup = side.players.findIndex((p) => p.replacement);
-    if (backup >= 0) active[backup] = true;
+// Exactly one quarterback plays: the highest one on the depth chart who's
+// healthy, or the stand-in backup if none is.
+function nflLineup(side: SideInput, rng: Rng): Lineup {
+  const lineup = sampleLineup(side, rng);
+  const { active } = lineup;
+  const players = side.players;
+  const available = players.map((_, i) => i).filter((i) => active[i] && isQuarterback(players[i]));
+  let qb = players.findIndex((p) => p.replacement);
+  if (available.length > 0) {
+    const top = Math.min(...available.map((i) => players[i].depth ?? 99));
+    const best = available.filter((i) => (players[i].depth ?? 99) === top);
+    // Not on the depth chart: favor whoever usually throws the most.
+    qb = best[pickWeighted(rng, best.map((i) => (players[i].avg.passAtt ?? 1) ** 2))];
   }
-  return active;
+  for (const i of available) active[i] = false;
+  if (qb >= 0) active[qb] = true;
+  return lineup;
 }
 
 interface DriveResult {
@@ -243,11 +261,8 @@ function nflBox(side: SideInput, active: boolean[], drive: DriveResult, rng: Rng
   const rushYards = (avg.rushYds ?? 0) * flow * wobble(rng, 0.25);
   const receptions = (avg.rec ?? 0) * Math.sqrt(flow) * wobble(rng, 0.12);
 
-  // One quarterback takes the snaps (the starter almost always).
-  const qb = pickWeighted(
-    rng,
-    players.map((p, i) => (active[i] && isQuarterback(p) ? (p.avg.passAtt ?? 1) ** 2 : 0)),
-  );
+  // nflLineup left exactly one quarterback active.
+  const qb = players.findIndex((p, i) => active[i] && isQuarterback(p));
   if (qb >= 0) {
     set(qb, "passYds", passYards);
     set(qb, "int", poisson(rng, (avg.int ?? 0.8) * wobble(rng, 0.3)));
