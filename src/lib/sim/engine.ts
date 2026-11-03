@@ -130,15 +130,16 @@ function nbaBox(
   const extraTime = 1 + (overtimes * 5) / 48;
   // A hot shooting night means more assists and threes too.
   const flow = Math.pow(points / Math.max(1, expected), 0.7);
-  const avg = side.teamAvg;
+  // The team's usual totals, nudged by what this opponent allows.
+  const usual = (key: string) => (side.teamAvg[key] ?? 0) * (side.matchup[key] ?? 1);
   const totals: Record<string, number> = {
     min: 240 * extraTime,
     pts: points,
-    reb: (avg.reb ?? 0) * extraTime * wobble(rng, 0.08),
-    ast: (avg.ast ?? 0) * flow * wobble(rng, 0.1),
-    fg3: (avg.fg3 ?? 0) * flow * wobble(rng, 0.15),
-    stl: (avg.stl ?? 0) * extraTime * wobble(rng, 0.2),
-    blk: (avg.blk ?? 0) * extraTime * wobble(rng, 0.25),
+    reb: usual("reb") * extraTime * wobble(rng, 0.08),
+    ast: usual("ast") * flow * wobble(rng, 0.1),
+    fg3: usual("fg3") * flow * wobble(rng, 0.15),
+    stl: usual("stl") * extraTime * wobble(rng, 0.2),
+    blk: usual("blk") * extraTime * wobble(rng, 0.25),
   };
   // How big each player's role is tonight (foul trouble, hot hand...).
   const role = side.players.map((_, i) => (active[i] ? wobble(rng, 0.12) : 0));
@@ -249,21 +250,22 @@ function nflBox(side: SideInput, active: boolean[], drive: DriveResult, rng: Rng
   const statCount = NFL_KEYS.length;
   const stats = new Float64Array(side.players.length * statCount);
   const players = side.players;
-  const avg = side.teamAvg;
   const set = (i: number, key: string, value: number) => (stats[i * statCount + NFL_INDEX[key]] = value);
   const add = (i: number, key: string) => (stats[i * statCount + NFL_INDEX[key]] += 1);
+  // The team's usual totals, nudged by what this opponent allows.
+  const usual = (key: string, fallback = 0) => (side.teamAvg[key] ?? fallback) * (side.matchup[key] ?? 1);
 
   // Scoring more than usual usually means more yards too.
   const flow = Math.sqrt((drive.points + 7) / (side.avgPoints + 7));
-  const passYards = (avg.passYds ?? 0) * flow * wobble(rng, 0.18);
-  const rushYards = (avg.rushYds ?? 0) * flow * wobble(rng, 0.25);
-  const receptions = (avg.rec ?? 0) * Math.sqrt(flow) * wobble(rng, 0.12);
+  const passYards = usual("passYds") * flow * wobble(rng, 0.18);
+  const rushYards = usual("rushYds") * flow * wobble(rng, 0.25);
+  const receptions = usual("rec") * Math.sqrt(flow) * wobble(rng, 0.12);
 
   // nflLineup left exactly one quarterback active.
   const qb = players.findIndex((p, i) => active[i] && isQuarterback(p));
   if (qb >= 0) {
     set(qb, "passYds", passYards);
-    set(qb, "int", poisson(rng, (avg.int ?? 0.8) * wobble(rng, 0.3)));
+    set(qb, "int", poisson(rng, usual("int", 0.8) * wobble(rng, 0.3)));
   }
 
   // Receivers: each gets a "target share" for the day.

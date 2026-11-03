@@ -6,6 +6,7 @@ import { BlockSkeleton } from "@/components/Skeleton";
 import { TeamLogo } from "@/components/TeamLogo";
 import { fixed, gameTime, signed } from "@/lib/format";
 import { isLeagueId, LEAGUES } from "@/lib/leagues";
+import { matchupLabels } from "@/lib/model/conditions";
 import { getMatchup, type MatchupData, type TeamContext } from "@/lib/model/matchup";
 import { formatRecord } from "@/lib/model/ratings";
 import type { GameSide } from "@/lib/types";
@@ -165,15 +166,18 @@ function TeamComparison({ data }: { data: MatchupData }) {
   );
 }
 
-// Rest and weather, already included in the expected points above.
+// Rest and weather (already in the expected points above) and how each
+// defense shifts the other team's stats.
 function GameConditions({ data }: { data: MatchupData }) {
   const { game, weather } = data;
+  const league = data.input.league;
   const sides = [
-    { abbr: game.away.team.abbr, adjustments: data.input.away.adjustments },
-    { abbr: game.home.team.abbr, adjustments: data.input.home.adjustments },
-  ];
+    { abbr: game.away.team.abbr, opp: game.home.team.abbr, input: data.input.away },
+    { abbr: game.home.team.abbr, opp: game.away.team.abbr, input: data.input.home },
+  ].map((s) => ({ ...s, adjustments: s.input.adjustments, matchup: matchupLabels(league, s.input.matchup) }));
   const any = sides.some((s) => s.adjustments.length > 0);
-  if (!weather && !any) return null;
+  const anyMatchup = sides.some((s) => s.matchup.length > 0);
+  if (!weather && !any && !anyMatchup) return null;
   return (
     <div className="mt-4 border-t border-line pt-3 text-sm">
       <h3 className="mb-1 font-semibold">Game conditions</h3>
@@ -199,6 +203,18 @@ function GameConditions({ data }: { data: MatchupData }) {
         </ul>
       ) : (
         <p className="text-ink-2">No effect on the expected score.</p>
+      )}
+      {anyMatchup && (
+        <ul className="mt-2 flex flex-col gap-0.5 text-ink-2">
+          {sides
+            .filter((s) => s.matchup.length > 0)
+            .map((s) => (
+              <li key={s.abbr}>
+                <span className="font-medium text-ink">{s.abbr}</span> against the {s.opp} defense:{" "}
+                {s.matchup.join(", ")}
+              </li>
+            ))}
+        </ul>
       )}
     </div>
   );

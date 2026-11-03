@@ -23,6 +23,8 @@ function side(players: PlayerInput[], expectedPoints = 22): SideInput {
     adjustments: [],
     avgPoints: expectedPoints,
     teamAvg: { passYds: 230, rushYds: 110, rec: 21, int: 0.8, reb: 44, ast: 25, fg3: 13, stl: 8, blk: 5 },
+    allowedAvg: {},
+    matchup: {},
     passTdShare: 0.6,
     players,
   };

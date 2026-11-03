@@ -5,7 +5,7 @@ import { LEAGUES, type LeagueId } from "../leagues";
 import type { ActualResult, Game, GameDetails, Injury, RosterPlayer, TeamRating, TeamSeasonStats } from "../types";
 import type { MatchupInput } from "../sim/types";
 import { getGameWeather, type GameWeather } from "../weather";
-import { restAdjustments, weatherAdjustments } from "./conditions";
+import { matchupFactors, restAdjustments, weatherAdjustments } from "./conditions";
 import { getLeagueSnapshot, getSeasonGames, powerRanks, type LeagueSnapshot } from "./league";
 import { buildSide, isRegular, playChance, type PlayerHistory, type SampleGame } from "./players";
 import { expectedScores, ratingWeight } from "./ratings";
@@ -83,6 +83,10 @@ export async function getMatchup(league: LeagueId, eventId: string): Promise<Mat
     }),
   );
 
+  // Each offense against the other's defense.
+  home.input.matchup = matchupFactors(league, home.input, away.input);
+  away.input.matchup = matchupFactors(league, away.input, home.input);
+
   return {
     game,
     input: {
@@ -128,11 +132,12 @@ async function loadSample(league: LeagueId, teamId: string, snapshot: LeagueSnap
   ];
   const sample = await mapLimit(chosen, 6, async ({ game, weight }) => {
     const box = await getGameDetails(league, game.id).catch(() => undefined);
-    if (!box) return { id: game.id, lines: [], benched: [], teamPoints: 0, weight }; // ESPN lost this one
-    const side = game.home.team.id === teamId ? game.home : game.away;
+    if (!box) return { id: game.id, lines: [], oppLines: [], benched: [], teamPoints: 0, weight }; // ESPN lost this one
+    const [side, opp] = game.home.team.id === teamId ? [game.home, game.away] : [game.away, game.home];
     return {
       id: game.id,
       lines: box.boxScore[teamId] ?? [],
+      oppLines: box.boxScore[opp.team.id] ?? [],
       benched: box.benched?.[teamId] ?? [], // missing in box scores cached before this field existed
       teamPoints: side.score ?? 0,
       weight,

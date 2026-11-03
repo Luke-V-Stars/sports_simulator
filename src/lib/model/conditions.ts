@@ -6,7 +6,7 @@
 // one is a single number here that's easy to change.
 
 import type { LeagueId } from "../leagues";
-import type { Adjustment } from "../sim/types";
+import type { Adjustment, SideInput } from "../sim/types";
 import type { Game } from "../types";
 import type { GameWeather } from "../weather";
 
@@ -75,4 +75,62 @@ export function weatherAdjustments(weather: GameWeather | undefined): Adjustment
   if (weather.precipMm >= 1) result.push({ label: "Rain or snow", points: WET_POINTS });
   if (weather.tempF < 25) result.push({ label: `Cold (${Math.round(weather.tempF)}°F)`, points: COLD_POINTS });
   return result;
+}
+
+// ---------- Matchups ----------
+
+// Only 8-10 games per defense, so its tendencies are pulled halfway to
+// typical and capped (about ±15%; keeping NFL total yards can stretch it a bit).
+const MATCHUP_WEIGHT = 0.5;
+const MATCHUP_CAP = 0.15;
+
+// Team stats a defense can push up or down. (NBA points come from the score.)
+const MATCHUP_KEYS: Record<LeagueId, string[]> = {
+  nfl: ["passYds", "rushYds", "int"],
+  nba: ["reb", "ast", "fg3", "stl", "blk"],
+};
+
+// Multipliers on the attacking team's totals from what this defense usually
+// allows, e.g. { passYds: 1.06, rushYds: 0.95 }. "Typical" is the average of
+// what both teams make and allow, a stand-in for the league average.
+//
+// NFL yards already rise and fall with the expected score (which already
+// counts the defense), so only the pass/run mix moves: total yards stay the
+// same. Receptions follow passing.
+export function matchupFactors(league: LeagueId, attack: SideInput, defense: SideInput): Record<string, number> {
+  const factors: Record<string, number> = {};
+  for (const key of MATCHUP_KEYS[league]) {
+    const values = [attack.teamAvg[key], attack.allowedAvg[key], defense.teamAvg[key], defense.allowedAvg[key]];
+    if (values.some((v) => v === undefined)) continue;
+    const typical = values.reduce((a, b) => a + b, 0) / values.length;
+    if (typical <= 0) continue;
+    const lean = MATCHUP_WEIGHT * (defense.allowedAvg[key] / typical - 1);
+    factors[key] = 1 + Math.max(-MATCHUP_CAP, Math.min(MATCHUP_CAP, lean));
+  }
+  if (league === "nfl" && factors.passYds && factors.rushYds) {
+    const pass = attack.teamAvg.passYds;
+    const rush = attack.teamAvg.rushYds;
+    const keepTotal = (pass + rush) / (pass * factors.passYds + rush * factors.rushYds);
+    factors.passYds *= keepTotal;
+    factors.rushYds *= keepTotal;
+    factors.rec = factors.passYds;
+  }
+  return factors;
+}
+
+// Short labels for the game page: "Passing +6%".
+export function matchupLabels(league: LeagueId, factors: Record<string, number>): string[] {
+  const names: Record<string, string> = {
+    passYds: "Passing",
+    rushYds: "Rushing",
+    int: "Interceptions",
+    reb: "Rebounds",
+    ast: "Assists",
+    fg3: "Threes",
+    stl: "Steals",
+    blk: "Blocks",
+  };
+  return MATCHUP_KEYS[league]
+    .filter((key) => factors[key] !== undefined && Math.abs(factors[key] - 1) >= 0.03)
+    .map((key) => `${names[key]} ${factors[key] > 1 ? "+" : "−"}${Math.round(Math.abs(factors[key] - 1) * 100)}%`);
 }

@@ -64,7 +64,10 @@ export default function HowItWorks() {
         <p className="mt-2">
           Then each team&apos;s points, yards, rebounds and assists are split among the players who played, based on
           their share over the last 8 (NFL) or 10 (NBA) games, with some randomness so a role player can have a big
-          night.
+          night. The team totals lean toward what the opponent&apos;s defense usually allows: against a defense that
+          gives up lots of passing yards, an NFL team throws a bit more and runs a bit less (total yards stay tied to
+          the score); against a team that gives up lots of rebounds, an NBA team grabs a few more. The lean is pulled
+          halfway to average and capped at about 15%.
         </p>
       </Step>
 

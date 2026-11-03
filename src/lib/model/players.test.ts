@@ -23,6 +23,7 @@ function sampleGames(count: number, lines: (g: number) => BoxScoreLine[], benche
   return Array.from({ length: count }, (_, g): SampleGame => ({
     id: `g${g}`,
     lines: lines(g),
+    oppLines: [],
     benched: benched(g),
     teamPoints: 100,
     weight: 1,

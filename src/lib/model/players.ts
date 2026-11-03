@@ -7,6 +7,7 @@ import type { Adjustment, PlayerInput, SideInput } from "../sim/types";
 export interface SampleGame {
   id: string;
   lines: BoxScoreLine[]; // this team's player lines from that game
+  oppLines: BoxScoreLine[]; // the opponent's lines: what this team's defense allowed
   benched: string[]; // NBA: healthy players who didn't get in
   teamPoints: number;
   weight: number; // this season = 1, last season = less
@@ -96,6 +97,14 @@ export function buildSide(args: {
   });
   const teamAvg: Record<string, number> = {};
   for (const [key, sum] of Object.entries(teamSums)) teamAvg[key] = sum / totalWeight;
+  const allowedAvg: Record<string, number> = {};
+  for (const game of sample) {
+    for (const line of game.oppLines) {
+      for (const [key, value] of Object.entries(line.stats)) {
+        allowedAvg[key] = (allowedAvg[key] ?? 0) + (game.weight * value) / totalWeight;
+      }
+    }
+  }
 
   const rosterById = new Map(roster.map((r) => [r.id, r]));
   const injuryById = new Map(injuries.map((i) => [i.playerId, i]));
@@ -174,6 +183,8 @@ export function buildSide(args: {
     adjustments,
     avgPoints: pointSum / totalWeight,
     teamAvg,
+    allowedAvg,
+    matchup: {}, // filled in once both teams are built (see matchupFactors)
     // Pulled toward the league-typical ~60% so a small sample can't say 100%.
     passTdShare: (passTd + 1.2) / (passTd + rushTd + 2),
     players: inputs,

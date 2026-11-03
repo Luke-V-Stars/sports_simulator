@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { LeagueId } from "../leagues";
 import type { Game, Team } from "../types";
-import { restAdjustments, weatherAdjustments } from "./conditions";
+import type { SideInput } from "../sim/types";
+import { matchupFactors, matchupLabels, restAdjustments, weatherAdjustments } from "./conditions";
 
 const team = (id: string): Team => ({ id, abbr: id.toUpperCase(), name: id, shortName: id, logo: "" });
 
@@ -76,5 +77,42 @@ describe("weather", () => {
     expect(sum(weatherAdjustments({ tempF: 60, windMph: 20, precipMm: 0 }))).toBeCloseTo(-1.5);
     expect(sum(weatherAdjustments({ tempF: 60, windMph: 50, precipMm: 0 }))).toBe(-3); // capped
     expect(sum(weatherAdjustments({ tempF: 15, windMph: 5, precipMm: 2 }))).toBeCloseTo(-1.25);
+  });
+});
+
+describe("matchups", () => {
+  const side = (teamAvg: Record<string, number>, allowedAvg: Record<string, number>): SideInput => ({
+    team: team("x"),
+    expectedPoints: 22,
+    adjustments: [],
+    avgPoints: 22,
+    teamAvg,
+    allowedAvg,
+    matchup: {},
+    passTdShare: 0.6,
+    players: [],
+  });
+  const usual = { passYds: 220, rushYds: 115, int: 0.8 };
+
+  it("shifts the pass/run mix toward what the defense gives up, keeping total yards", () => {
+    const attack = side(usual, usual);
+    const leakyPassD = side(usual, { passYds: 280, rushYds: 95, int: 0.8 });
+    const f = matchupFactors("nfl", attack, leakyPassD);
+    expect(f.passYds).toBeGreaterThan(1);
+    expect(f.rushYds).toBeLessThan(1);
+    expect(220 * f.passYds + 115 * f.rushYds).toBeCloseTo(335);
+    expect(f.rec).toBe(f.passYds);
+  });
+
+  it("changes nothing against a typical defense", () => {
+    const f = matchupFactors("nba", side({ reb: 44, ast: 25 }, { reb: 44, ast: 25 }), side({ reb: 44, ast: 25 }, { reb: 44, ast: 25 }));
+    expect(f.reb).toBe(1);
+    expect(matchupLabels("nba", f)).toEqual([]);
+  });
+
+  it("caps the effect of an extreme defense", () => {
+    const f = matchupFactors("nba", side({ blk: 5 }, { blk: 5 }), side({ blk: 5 }, { blk: 30 }));
+    expect(f.blk).toBeCloseTo(1.15);
+    expect(matchupLabels("nba", f)).toEqual(["Blocks +15%"]);
   });
 });

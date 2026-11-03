@@ -48,6 +48,10 @@ export interface SideInput {
   adjustments: Adjustment[];
   avgPoints: number; // average points in the games we sampled players from
   teamAvg: Record<string, number>; // team totals per game (e.g. passing yards)
+  allowedAvg: Record<string, number>; // what its defense allows per game
+  // Multipliers on this team's totals from the opponent's defense, e.g.
+  // { passYds: 1.06 }. A missing key means 1 (no change).
+  matchup: Record<string, number>;
   passTdShare: number; // NFL: share of touchdowns that are passing touchdowns
   players: PlayerInput[];
 }
