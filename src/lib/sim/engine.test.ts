@@ -7,7 +7,7 @@ import type { MatchupInput, PlayerInput, SideInput } from "./types";
 // ---------- Helpers to build small, made-up matchups ----------
 
 function p(id: string, overrides: Partial<PlayerInput> = {}): PlayerInput {
-  return { id, name: id, playProb: 1, rolePct: 1, gamesPlayed: 8, avg: {}, impact: 0, ...overrides };
+  return { id, name: id, playProb: 1, rolePct: 1, gamesPlayed: 8, avg: {}, impact: 0, ratedShare: 1, ...overrides };
 }
 
 const qb = (id: string, depth: number, extra: Partial<PlayerInput> = {}) =>
@@ -87,18 +87,35 @@ describe("who plays", () => {
     expect(rate("a")).toBe(1);
   });
 
-  it("injured players' absence costs points; a bench player's doesn't", () => {
-    const avgScore = (players: PlayerInput[]) => {
-      const rng = makeRng(3);
-      let total = 0;
-      for (let r = 0; r < 4000; r++) total += playGame(matchup("nba", players), rng).home.score;
-      return total / 4000;
-    };
+});
+
+describe("expected points follow the lineup", () => {
+  const avgScore = (extra: PlayerInput) => {
     const starters = ["a", "b", "c", "d"].map((id) => p(id, { avg: { min: 34, pts: 18 } }));
-    const healthy = avgScore([...starters, p("star", { avg: { min: 36, pts: 30 }, impact: 6 })]);
-    const injured = avgScore([...starters, p("star", { avg: { min: 36, pts: 30 }, impact: 6, playProb: 0 })]);
-    const benched = avgScore([...starters, p("star", { avg: { min: 36, pts: 30 }, impact: 6, rolePct: 0 })]);
-    expect(healthy - injured).toBeCloseTo(6, 0);
-    expect(Math.abs(healthy - benched)).toBeLessThan(1);
+    const input = matchup("nba", [...starters, extra]);
+    const rng = makeRng(3);
+    let total = 0;
+    for (let r = 0; r < 4000; r++) total += playGame(input, rng).home.score;
+    return total / 4000;
+  };
+  const star = (overrides: Partial<PlayerInput>) => p("star", { avg: { min: 36, pts: 30 }, impact: 6, ...overrides });
+  const baseline = avgScore(star({ impact: 0 }));
+
+  it("a star who always plays changes nothing; sitting him costs his impact", () => {
+    expect(avgScore(star({}))).toBeCloseTo(baseline, 0);
+    expect(baseline - avgScore(star({ playProb: 0 }))).toBeCloseTo(6, 0);
+  });
+
+  it("a star out for weeks and still out costs little (the rating already lacks him)", () => {
+    expect(baseline - avgScore(star({ playProb: 0, ratedShare: 0.1 }))).toBeCloseTo(0.6, 0);
+  });
+
+  it("a star back from a long absence lifts the team", () => {
+    expect(avgScore(star({ ratedShare: 0.25 })) - baseline).toBeCloseTo(4.5, 0);
+  });
+
+  it("a bench player who plays as often as before changes nothing on average", () => {
+    const bench = p("bench", { avg: { min: 10, pts: 4 }, impact: 2, rolePct: 0.3, ratedShare: 0.3 });
+    expect(avgScore(bench)).toBeCloseTo(baseline, 0);
   });
 });

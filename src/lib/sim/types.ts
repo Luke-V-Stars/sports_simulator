@@ -24,8 +24,12 @@ export interface PlayerInput {
   // His per-game averages when he plays. Keys match LEAGUES[league].playerStats
   // plus helpers: passAtt, rushAtt, tgt (NFL).
   avg: Record<string, number>;
-  // Points his team loses when he sits out.
+  // Points his team loses when he sits out (beyond what backups make up).
   impact: number;
+  // How much of him is already in the team's expected points (0-1): the
+  // share of the team's rated games he played. Playing adds the rest of his
+  // impact; sitting takes this share away.
+  ratedShare: number;
   // NFL only: a stand-in "backup QB" used when no quarterback is available.
   replacement?: boolean;
 }

@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { LeagueId } from "../leagues";
 import type { BoxScoreLine, Injury, RosterPlayer } from "../types";
-import { buildSide, playChance, RUST_WORKLOAD, type PlayerHistory, type SampleGame } from "./players";
+import {
+  buildSide,
+  playChance,
+  RUST_WORKLOAD,
+  type PlayerHistory,
+  type SampleGame,
+  type TeamGame,
+} from "./players";
 
 // ---------- Helpers to build small, made-up teams ----------
 
@@ -35,7 +42,7 @@ function build(
     depth?: Record<string, number>;
     injuries?: Injury[];
     history?: Record<string, PlayerHistory>;
-    teamDates?: string[];
+    teamGames?: TeamGame[];
   },
 ) {
   return buildSide({
@@ -45,7 +52,7 @@ function build(
     depth: {},
     injuries: [],
     history: {},
-    teamDates: [],
+    teamGames: [],
     gameDate: GAME_DATE,
     ...args,
   });
@@ -121,49 +128,72 @@ describe("NFL roles", () => {
 
 describe("players returning from a long absence", () => {
   const rb = { rushAtt: 15, rushYds: 70, rec: 2, recYds: 15, tgt: 3 };
-  const weekly = (count: number, startDaysAgo: number) =>
-    Array.from({ length: count }, (_, i) => daysAgo(startDaysAgo + 7 * i));
-  const teamDates = weekly(16, 7); // the team played every week
+  // The team played every week; its newest 8 games are the sample (g0-g7).
+  const teamGames = Array.from({ length: 16 }, (_, i) => ({ id: `g${i}`, date: daysAgo(7 + 7 * i), weight: 1 }));
+  const playedTeamGames = (...indexes: number[]) => indexes.map((i) => ({ id: teamGames[i].id, date: teamGames[i].date }));
+  const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  const extra = Array.from({ length: 8 }, () => ({ stats: rb, weight: 1 }));
+  const args = { sample: sampleGames(8, () => []), roster: roster(["rb1", "RB"]), depth: { rb1: 1 }, teamGames };
 
   it("adds a regular with no recent games and eases his first game back", () => {
-    const sample = sampleGames(8, () => [line("rb2", { rushAtt: 10, rushYds: 40 }, "RB")]);
-    const history: Record<string, PlayerHistory> = {
-      // Last played 10 weeks ago.
-      rb1: { extra: Array.from({ length: 8 }, () => ({ stats: rb, weight: 0.5 })), dates: weekly(8, 70) },
-    };
-    const side = build("nfl", {
-      sample,
-      roster: roster(["rb1", "RB"], ["rb2", "RB"]),
-      depth: { rb1: 1, rb2: 2 },
-      history,
-      teamDates,
-    });
-    const rb1 = player(side, "rb1");
+    // Last played for this team 10 weeks ago.
+    const history: Record<string, PlayerHistory> = { rb1: { extra, played: playedTeamGames(...range(10, 15)) } };
+    const rb1 = player(build("nfl", { ...args, history }), "rb1");
     expect(rb1?.returning).toBe(1);
     expect(rb1?.rolePct).toBe(1);
     expect(rb1?.avg.rushYds).toBeCloseTo(70 * RUST_WORKLOAD[0]);
+    // The team rating mostly reflects games without him.
+    expect(rb1?.ratedShare).toBeCloseTo(6 / 16);
   });
 
   it("eases less in his second game back, then not at all", () => {
-    const sample = sampleGames(8, () => []);
-    const extra = Array.from({ length: 8 }, () => ({ stats: rb, weight: 1 }));
-    // Played last week after a long gap...
-    const secondGame = { extra, dates: [daysAgo(7), ...weekly(7, 70)] };
-    // ...or the last two weeks.
-    const thirdGame = { extra, dates: [daysAgo(7), daysAgo(14), ...weekly(6, 70)] };
-    const args = { sample, roster: roster(["rb1", "RB"]), depth: { rb1: 1 }, teamDates };
-    expect(player(build("nfl", { ...args, history: { rb1: secondGame } }), "rb1")?.returning).toBe(2);
-    expect(player(build("nfl", { ...args, history: { rb1: thirdGame } }), "rb1")?.returning).toBeUndefined();
+    const second = { extra, played: playedTeamGames(0, ...range(10, 15)) };
+    const third = { extra, played: playedTeamGames(0, 1, ...range(10, 15)) };
+    expect(player(build("nfl", { ...args, history: { rb1: second } }), "rb1")?.returning).toBe(2);
+    expect(player(build("nfl", { ...args, history: { rb1: third } }), "rb1")?.returning).toBeUndefined();
   });
 
-  it("doesn't treat the offseason or a trade as an absence", () => {
-    const sample = sampleGames(8, () => []);
-    const extra = Array.from({ length: 8 }, () => ({ stats: rb, weight: 1 }));
-    // Played every week (for another team, or before a long offseason the
-    // team also sat through: no team games fall in between).
-    const history = { rb1: { extra, dates: weekly(8, 7) } };
-    const side = build("nfl", { sample, roster: roster(["rb1", "RB"]), depth: { rb1: 1 }, history, teamDates });
-    expect(player(side, "rb1")?.returning).toBeUndefined();
-    expect(player(side, "rb1")?.avg.rushYds).toBeCloseTo(70);
+  it("doesn't treat the offseason as an absence", () => {
+    // Played every team game; the long offseason has no team games in it.
+    const history = { rb1: { extra, played: playedTeamGames(...range(0, 15)) } };
+    const rb1 = player(build("nfl", { ...args, history }), "rb1");
+    expect(rb1?.returning).toBeUndefined();
+    expect(rb1?.ratedShare).toBe(1);
+  });
+
+  it("doesn't treat a trade as an absence, but the new team's rating lacks him", () => {
+    // Played every week for another team (a day before each of ours).
+    const played = teamGames.map((g, i) => ({ id: `other${i}`, date: daysAgo(8 + 7 * i) }));
+    const rb1 = player(build("nfl", { ...args, history: { rb1: { extra, played } } }), "rb1");
+    expect(rb1?.returning).toBeUndefined();
+    expect(rb1?.avg.rushYds).toBeCloseTo(70);
+    expect(rb1?.ratedShare).toBe(0);
+  });
+});
+
+describe("how much of a player is in the team rating", () => {
+  const wr = { rec: 4, recYds: 50, tgt: 6 };
+  const teamGames = Array.from({ length: 16 }, (_, i) => ({ id: `g${i}`, date: daysAgo(7 + 7 * i), weight: 1 }));
+
+  it("is everything for a player who always plays", () => {
+    const sample = sampleGames(8, () => [line("wr1", wr, "WR")]);
+    const side = build("nfl", { sample, roster: roster(["wr1", "WR"]), depth: { wr1: 1 }, teamGames });
+    expect(player(side, "wr1")?.ratedShare).toBe(1);
+  });
+
+  it("assumes older games went like recent ones when we have no game log", () => {
+    const sample = sampleGames(8, (g) => (g % 2 ? [line("wr1", wr, "WR")] : []));
+    const side = build("nfl", { sample, roster: roster(["wr1", "WR"]), depth: { wr1: 1 }, teamGames });
+    expect(player(side, "wr1")?.ratedShare).toBeCloseTo(0.5);
+  });
+
+  it("gives backup quarterbacks no value of their own", () => {
+    const sample = sampleGames(8, (g) => [
+      line("qb1", { passAtt: 34, passYds: 250 }, "QB"),
+      ...(g === 0 ? [line("qb2", { passAtt: 8, passYds: 60 }, "QB")] : []),
+    ]);
+    const side = build("nfl", { sample, roster: roster(["qb1", "QB"], ["qb2", "QB"]), depth: { qb1: 1, qb2: 2 } });
+    expect(player(side, "qb1")?.impact).toBeGreaterThan(5);
+    expect(player(side, "qb2")?.impact).toBe(0);
   });
 });

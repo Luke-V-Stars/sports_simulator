@@ -132,7 +132,7 @@ function TeamComparison({ data }: { data: MatchupData }) {
       home: home.stats ? fixed(home.stats.pointsAgainst, 1) : "–",
     },
     {
-      label: "Expected points (before injuries)",
+      label: "Expected points (before lineup changes)",
       away: fixed(data.input.away.expectedPoints, 1),
       home: fixed(data.input.home.expectedPoints, 1),
     },

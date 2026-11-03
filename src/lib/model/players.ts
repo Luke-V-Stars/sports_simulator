@@ -16,7 +16,14 @@ export interface SampleGame {
 // traded here): his own games from ESPN's game log.
 export interface PlayerHistory {
   extra: { stats: Record<string, number>; weight: number }[]; // added to his averages
-  dates: string[]; // every recent game he played, newest first
+  played: { id: string; date: string }[]; // every recent game he played (any team), newest first
+}
+
+// One of the team's finished games, weighted the way the team ratings weigh it.
+export interface TeamGame {
+  id: string;
+  date: string;
+  weight: number;
 }
 
 // A team game a player missed counts toward a "long absence" from this many
@@ -56,10 +63,10 @@ export function buildSide(args: {
   depth: Record<string, number>; // depth chart spots
   injuries: Injury[];
   history: Record<string, PlayerHistory>;
-  teamDates: string[]; // dates of the team's finished games, newest first
+  teamGames: TeamGame[]; // the team's finished games, newest first
   gameDate: string; // the game being simulated
 }): SideInput {
-  const { league, team, expectedPoints, sample, roster, depth, injuries, history, teamDates, gameDate } = args;
+  const { league, team, expectedPoints, sample, roster, depth, injuries, history, teamGames, gameDate } = args;
   const totalWeight = sample.reduce((sum, g) => sum + g.weight, 0) || 1;
 
   // Add up every stat, per player and for the whole team.
@@ -119,7 +126,7 @@ export function buildSide(args: {
     if (!isRelevant(league, avg)) continue;
 
     // Back from a long absence: expect a lighter workload at first.
-    const back = history[id] && gamesBack(league, history[id].dates, teamDates, gameDate);
+    const back = history[id] && gamesBack(league, history[id].played, teamGames, gameDate);
     const returning = back !== undefined && back < RUST_WORKLOAD.length ? back + 1 : undefined;
     if (returning) {
       for (const key of Object.keys(avg)) avg[key] *= RUST_WORKLOAD[returning - 1];
@@ -141,11 +148,19 @@ export function buildSide(args: {
       injury: injury ? { status: injury.status, detail: injury.detail } : undefined,
       gamesPlayed: p.games.length + (history[id]?.extra.length ?? 0),
       avg,
-      impact: playerImpact(league, avg, teamAvg) * role,
+      impact: playerImpact(league, avg, teamAvg),
+      ratedShare: ratedShare(sample, p.games, history[id], teamGames),
     });
   }
 
-  if (league === "nfl") inputs.push(backupQuarterback(team, roster, depth, inputs, injuryById, teamAvg));
+  if (league === "nfl") {
+    // Only one quarterback plays, so his value is the starter's alone: a
+    // backup filling in doesn't add points on top.
+    const qbs = inputs.filter((p) => p.position === "QB");
+    const starter = qbs.sort((a, b) => (a.depth ?? 99) - (b.depth ?? 99) || importance(league, b) - importance(league, a))[0];
+    for (const p of qbs) if (p !== starter) p.impact = 0;
+    inputs.push(backupQuarterback(team, roster, depth, inputs, injuryById, teamAvg));
+  }
 
   inputs.sort((a, b) => importance(league, b) - importance(league, a));
 
@@ -195,17 +210,47 @@ function rolePct(
 // first game back), or undefined if he hasn't had one lately. An absence is
 // counted in the team's games, so the offseason doesn't count, and a player
 // traded here (still playing for his old team) isn't treated as absent.
-function gamesBack(league: LeagueId, played: string[], teamDates: string[], gameDate: string): number | undefined {
+function gamesBack(
+  league: LeagueId,
+  played: PlayerHistory["played"],
+  teamGames: TeamGame[],
+  gameDate: string,
+): number | undefined {
   // played[k - 1] is newer than played[k]; check the stretch between them.
   // (Dates are compared as times: ESPN writes them in different formats.)
-  const team = teamDates.map((d) => Date.parse(d));
+  const team = teamGames.map((g) => Date.parse(g.date));
   for (let k = 0; k < Math.min(RUST_WORKLOAD.length, played.length); k++) {
-    const newer = Date.parse(k === 0 ? gameDate : played[k - 1]);
-    const older = Date.parse(played[k]);
+    const newer = Date.parse(k === 0 ? gameDate : played[k - 1].date);
+    const older = Date.parse(played[k].date);
     const missed = team.filter((d) => d < newer && d > older).length;
     if (missed >= LONG_ABSENCE[league]) return k;
   }
   return undefined;
+}
+
+// How much of this player is already in the team's expected points: the share
+// of the team's rated games he played, weighted like the ratings. A starter
+// who has played every game is fully "in" (1); one back from a two-month
+// injury is mostly not, so his return lifts the team.
+function ratedShare(
+  sample: SampleGame[],
+  games: number[], // indexes into sample where he played
+  history: PlayerHistory | undefined,
+  teamGames: TeamGame[],
+): number {
+  const sampleTotal = sample.reduce((sum, g) => sum + g.weight, 0);
+  const sampleShare = sampleTotal ? games.reduce((sum, g) => sum + sample[g].weight, 0) / sampleTotal : 0;
+  const inSample = new Set(sample.map((g) => g.id));
+  const playedIds = new Set([...games.map((g) => sample[g].id), ...(history?.played.map((g) => g.id) ?? [])]);
+  let played = 0;
+  let total = 0;
+  for (const g of teamGames) {
+    // Older games without his game log: assume he played as often as lately.
+    const share = inSample.has(g.id) || history ? (playedIds.has(g.id) ? 1 : 0) : sampleShare;
+    played += g.weight * share;
+    total += g.weight;
+  }
+  return total ? played / total : sampleShare;
 }
 
 // Skip players who barely see the field.
@@ -254,6 +299,7 @@ function backupQuarterback(
     headshot: backup?.headshot,
     playProb: 1,
     rolePct: 1,
+    ratedShare: 0,
     depth: backup && depth[backup.id],
     gamesPlayed: 0,
     avg: { passAtt: 30, int: teamAvg.int ?? 0.8, rushYds: 5 },

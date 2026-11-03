@@ -33,9 +33,14 @@ export default function HowItWorks() {
         the highest healthy one on ESPN&apos;s depth chart. Regulars who missed recent games (back from injury, or
         just traded) are filled in with their own most recent games, last season&apos;s if needed, and in their
         first two games back they get about 75% and then 90% of their usual workload, since teams ease players
-        back in. When an important player is injured, his team&apos;s
-        expected points drop (a starting NFL quarterback is worth about 6 points) and his usual production is handed
-        to teammates who did play.
+        back in.
+        <p className="mt-2">
+          Then the expected score is adjusted for who plays. The team ratings already include each player as often
+          as he has played, so only changes count: when an important player sits, his team&apos;s expected points
+          drop (a starting NFL quarterback is worth about 6 points) and his usual production goes to teammates; when
+          one comes back after the team spent weeks without him, they rise. A player who has been out for a month and
+          is still out barely moves anything, because the ratings already reflect those games without him.
+        </p>
       </Step>
 
       <Step n={5} title="Play the game, thousands of times">
@@ -64,9 +69,8 @@ export default function HowItWorks() {
 
       <section className="rounded-xl border border-edge bg-surface p-4 text-sm text-ink-2">
         <h2 className="mb-1 font-semibold text-ink">What it doesn&apos;t know</h2>
-        Weather, rest days and travel, coaching changes, and how much a returning or newly traded player lifts his
-        team&apos;s score (he gets his share of the stats, but the team&apos;s expected points come from its recent
-        games without him). Backups new to a team, and rookies with no games yet, are left out. It also uses ESPN&apos;s unofficial feeds, which could change without notice. Treat
+        Weather, rest days and travel, and coaching changes. Backups new to a team, and rookies with no games yet,
+        are left out. It also uses ESPN&apos;s unofficial feeds, which could change without notice. Treat
         the numbers as an educated estimate, and compare them with the Vegas lines shown on each game.
       </section>
 

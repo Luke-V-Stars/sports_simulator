@@ -36,15 +36,12 @@ export function fitRatings(
   asOf: string,
 ): RatingsResult {
   const config = LEAGUES[league];
-  const asOfMs = Date.parse(asOf);
 
   const obs: Observation[] = [];
   const teams = new Set<string>();
   for (const g of games) {
     if (!g.completed || g.home.score === null || g.away.score === null) continue;
-    const ageDays = Math.max(0, (asOfMs - Date.parse(g.date)) / DAY_MS);
-    let weight = Math.pow(0.5, ageDays / config.ratingHalfLifeDays);
-    if (g.seasonYear < currentSeason) weight *= config.previousSeasonWeight;
+    const weight = ratingWeight(league, g, currentSeason, asOf);
     const home = g.neutralSite ? 0 : 0.5;
     obs.push({ team: g.home.team.id, opp: g.away.team.id, points: g.home.score, home, weight });
     obs.push({ team: g.away.team.id, opp: g.home.team.id, points: g.away.score, home: -home, weight });
@@ -107,6 +104,20 @@ export function fitRatings(
     ratings[t] = { teamId: t, offense: off, defense: def, net: off + def };
   }
   return { ratings, leagueAverage: mu, gamesUsed: obs.length / 2 };
+}
+
+// How much one finished game counts in the ratings: recent games most, last
+// season's games less.
+export function ratingWeight(
+  league: LeagueId,
+  game: Pick<Game, "date" | "seasonYear">,
+  currentSeason: number,
+  asOf: string,
+): number {
+  const config = LEAGUES[league];
+  const ageDays = Math.max(0, (Date.parse(asOf) - Date.parse(game.date)) / DAY_MS);
+  const weight = Math.pow(0.5, ageDays / config.ratingHalfLifeDays);
+  return game.seasonYear < currentSeason ? weight * config.previousSeasonWeight : weight;
 }
 
 function average(values: number[]): number {

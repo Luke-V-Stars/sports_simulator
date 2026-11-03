@@ -6,7 +6,7 @@ import type { ActualResult, Game, GameDetails, Injury, RosterPlayer, TeamRating,
 import type { MatchupInput } from "../sim/types";
 import { getLeagueSnapshot, powerRanks, type LeagueSnapshot } from "./league";
 import { buildSide, isRegular, playChance, type PlayerHistory, type SampleGame } from "./players";
-import { expectedScores } from "./ratings";
+import { expectedScores, ratingWeight } from "./ratings";
 
 export interface TeamContext {
   rating: TeamRating;
@@ -54,7 +54,11 @@ export async function getMatchup(league: LeagueId, eventId: string): Promise<Mat
         depth,
         injuries,
         history,
-        teamDates: teamGames(snapshot, team.id).map((g) => g.date),
+        teamGames: teamGames(snapshot, team.id).map((g) => ({
+          id: g.id,
+          date: g.date,
+          weight: ratingWeight(league, g, snapshot.seasonYear, snapshot.asOf),
+        })),
         gameDate: game.date,
       });
       const context: TeamContext = {
@@ -169,7 +173,7 @@ async function loadHistory(
     const history: PlayerHistory = {
       // Games already in the sample are counted there.
       extra: games.filter((g) => !sampleIds.has(g.id)).slice(0, Math.max(0, wanted - played)),
-      dates: games.map((g) => g.date),
+      played: games.map(({ id, date }) => ({ id, date })),
     };
     return [r.id, history] as const;
   });
