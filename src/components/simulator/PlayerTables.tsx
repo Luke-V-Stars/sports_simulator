@@ -5,34 +5,11 @@
 
 import { pct } from "@/lib/format";
 import { LEAGUES, type LeagueId, type StatDef } from "@/lib/leagues";
-import { checkRange } from "@/lib/sim/compare";
+import { checkRange, playersInRange, statTables } from "@/lib/sim/compare";
 import type { PlayerProjection } from "@/lib/sim/summary";
 import type { BoxScoreLine } from "@/lib/types";
 import { InjuryBadge } from "../InjuryBadge";
 import { RangeMark } from "./ResultCheck";
-
-interface Group {
-  title: string;
-  keys: string[];
-  include: (p: PlayerProjection) => boolean;
-  limit: number;
-}
-
-// NFL players are split into passing / rushing / receiving tables.
-const NFL_GROUPS: Group[] = [
-  { title: "Passing", keys: ["passYds", "passTd", "int"], include: (p) => p.stats.passYds.mean >= 20, limit: 2 },
-  { title: "Rushing", keys: ["rushYds", "rushTd"], include: (p) => p.stats.rushYds.mean >= 3, limit: 5 },
-  { title: "Receiving", keys: ["rec", "recYds", "recTd"], include: (p) => p.stats.rec.mean >= 0.5, limit: 7 },
-];
-
-const NBA_GROUPS: Group[] = [
-  {
-    title: "Players",
-    keys: LEAGUES.nba.playerStats.map((s) => s.key),
-    include: (p) => p.playPct > 0,
-    limit: 13,
-  },
-];
 
 interface Props {
   league: LeagueId;
@@ -42,34 +19,17 @@ interface Props {
 
 export function PlayerTables({ league, players, actual }: Props) {
   const defs = new Map(LEAGUES[league].playerStats.map((s) => [s.key, s]));
-  const groups = league === "nfl" ? NFL_GROUPS : NBA_GROUPS;
   // Healthy backups who never got in (e.g. the No. 2 QB) aren't listed.
   const sittingOut = players.filter((p) => p.out);
-  const tables = groups.map((group) => ({
-    group,
-    rows: players
-      .filter((p) => p.playPct > 0 && group.include(p))
-      .sort((a, b) => b.stats[group.keys[0]].mean - a.stats[group.keys[0]].mean)
-      .slice(0, group.limit),
-  }));
+  const tables = statTables(league, players);
+  const groupCount = tables.length;
 
   const actualById = actual && new Map(actual.map((line) => [line.playerId, line]));
   // NBA box scores list everyone who played; NFL ones only list players with stats.
   const missingLabel = league === "nba" ? "DNP" : "–";
 
   // How many of the shown stats landed inside the projected range.
-  let inside = 0;
-  let checked = 0;
-  for (const { group, rows } of tables) {
-    for (const p of rows) {
-      const line = actualById?.get(p.id);
-      if (!line) continue;
-      for (const key of group.keys) {
-        checked++;
-        if (checkRange(line.stats[key] ?? 0, p.stats[key].low, p.stats[key].high) === "inside") inside++;
-      }
-    }
-  }
+  const { inside, checked } = playersInRange(tables, actual ?? []);
 
   // Players who really played but weren't in the projection (or were expected to sit).
   const projected = new Set(players.filter((p) => p.playPct > 0).map((p) => p.id));
@@ -84,7 +44,7 @@ export function PlayerTables({ league, players, actual }: Props) {
         if (rows.length === 0) return null;
         return (
           <div key={group.title} className="overflow-x-auto">
-            {groups.length > 1 && <h4 className="mb-1 text-sm font-semibold">{group.title}</h4>}
+            {groupCount > 1 && <h4 className="mb-1 text-sm font-semibold">{group.title}</h4>}
             <table className="tabular w-full min-w-[520px] text-sm">
               <thead className="text-xs text-muted">
                 <tr className="border-b border-line">

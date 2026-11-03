@@ -61,9 +61,11 @@ function LeagueTabsWithPath({ league }: { league: string }) {
 
 function Tabs({ league, pathname }: { league: string; pathname: string }) {
   const onRankings = pathname.includes("/rankings");
+  const onAccuracy = pathname.includes("/accuracy");
   const tabs = [
-    { href: `/${league}`, label: "Games", active: pathname !== "" && !onRankings },
+    { href: `/${league}`, label: "Games", active: pathname !== "" && !onRankings && !onAccuracy },
     { href: `/${league}/rankings`, label: "Power rankings", active: onRankings },
+    { href: `/${league}/accuracy`, label: "Accuracy", active: onAccuracy },
   ];
   return (
     <div className="flex gap-4 border-b border-line text-sm">

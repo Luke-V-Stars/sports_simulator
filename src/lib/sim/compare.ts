@@ -1,8 +1,9 @@
 // Checks a finished game's projections against what really happened.
 
 import { roundHalf } from "../format";
-import type { ActualResult, VegasLine } from "../types";
-import type { SimSummary } from "./summary";
+import { LEAGUES, type LeagueId } from "../leagues";
+import type { ActualResult, BoxScoreLine, VegasLine } from "../types";
+import type { PlayerProjection, SimSummary } from "./summary";
 
 // Where a real number landed compared with the model's typical range
 // (10th to 90th percentile of the simulations).
@@ -62,5 +63,156 @@ function valueCheck(projected: number, range: { low: number; high: number }, act
     actual,
     miss: Math.abs(projected - actual),
     range: checkRange(actual, range.low, range.high),
+  };
+}
+
+// ---------- Player stat tables ----------
+
+export interface StatGroup {
+  title: string;
+  keys: string[];
+  include: (p: PlayerProjection) => boolean;
+  limit: number;
+}
+
+// NFL players are split into passing / rushing / receiving tables.
+const STAT_GROUPS: Record<LeagueId, StatGroup[]> = {
+  nfl: [
+    { title: "Passing", keys: ["passYds", "passTd", "int"], include: (p) => p.stats.passYds.mean >= 20, limit: 2 },
+    { title: "Rushing", keys: ["rushYds", "rushTd"], include: (p) => p.stats.rushYds.mean >= 3, limit: 5 },
+    { title: "Receiving", keys: ["rec", "recYds", "recTd"], include: (p) => p.stats.rec.mean >= 0.5, limit: 7 },
+  ],
+  nba: [
+    {
+      title: "Players",
+      keys: LEAGUES.nba.playerStats.map((s) => s.key),
+      include: (p) => p.playPct > 0,
+      limit: 13,
+    },
+  ],
+};
+
+// The rows each table shows: players expected to play, biggest first.
+export function statTables(league: LeagueId, players: PlayerProjection[]) {
+  return STAT_GROUPS[league].map((group) => ({
+    group,
+    rows: players
+      .filter((p) => p.playPct > 0 && group.include(p))
+      .sort((a, b) => b.stats[group.keys[0]].mean - a.stats[group.keys[0]].mean)
+      .slice(0, group.limit),
+  }));
+}
+
+// How many of the shown stats landed inside the projected range, for players
+// who are in the real box score.
+export function playersInRange(tables: ReturnType<typeof statTables>, actual: BoxScoreLine[]) {
+  const byId = new Map(actual.map((line) => [line.playerId, line]));
+  let inside = 0;
+  let checked = 0;
+  for (const { group, rows } of tables) {
+    for (const p of rows) {
+      const line = byId.get(p.id);
+      if (!line) continue;
+      for (const key of group.keys) {
+        checked++;
+        if (checkRange(line.stats[key] ?? 0, p.stats[key].low, p.stats[key].high) === "inside") inside++;
+      }
+    }
+  }
+  return { inside, checked };
+}
+
+// ---------- Season accuracy report ----------
+
+// One finished game, re-predicted using only what was known before it.
+export interface GameEvaluation {
+  id: string;
+  date: string;
+  homeAbbr: string;
+  awayAbbr: string;
+  homeWinPct: number;
+  awayWinPct: number;
+  check: GameCheck;
+  vegasFavorite?: "home" | "away"; // undefined if no line or a pick'em
+  players: { inside: number; checked: number };
+}
+
+export interface Tally {
+  hits: number;
+  total: number;
+}
+
+export interface CalibrationBin {
+  from: number; // favorite's chance, e.g. 0.6
+  to: number;
+  games: number;
+  predicted: number; // average chance the model gave the favorite
+  actual: number; // share of those games the favorite won
+}
+
+export interface AccuracySummary {
+  games: number;
+  picks: { model: Tally; vegas: Tally }; // winner picked right (ties left out)
+  // Average points off. "onVegasGames" uses only games with a line, so it
+  // can be compared with Vegas fairly.
+  margin: { model: number; onVegasGames: number; vegas: number; vegasGames: number };
+  total: { model: number; onVegasGames: number; vegas: number; vegasGames: number };
+  brier: number; // average (chance - result)^2; always saying 50% scores 0.25
+  calibration: CalibrationBin[];
+  scoresInRange: Tally; // team scores inside the 10th-90th percentile range
+  playersInRange: Tally;
+}
+
+const BINS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0001];
+
+export function summarizeAccuracy(evals: GameEvaluation[]): AccuracySummary {
+  const average = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+  const decided = evals.filter((e) => e.check.winner !== "tie");
+  const withSpread = evals.filter((e) => e.check.vegasMarginMiss !== undefined);
+  const withTotal = evals.filter((e) => e.check.vegasTotalMiss !== undefined);
+  const withFavorite = decided.filter((e) => e.vegasFavorite);
+
+  const calibration = BINS.slice(0, -1).map((from, i) => {
+    const inBin = decided.filter((e) => {
+      const favorite = Math.max(e.homeWinPct, e.awayWinPct);
+      return favorite >= from && favorite < BINS[i + 1];
+    });
+    return {
+      from,
+      to: Math.min(1, BINS[i + 1]),
+      games: inBin.length,
+      predicted: average(inBin.map((e) => Math.max(e.homeWinPct, e.awayWinPct))),
+      actual: average(inBin.map((e) => (e.check.winner === e.check.pick ? 1 : 0))),
+    };
+  });
+
+  return {
+    games: evals.length,
+    picks: {
+      model: { hits: decided.filter((e) => e.check.winner === e.check.pick).length, total: decided.length },
+      vegas: { hits: withFavorite.filter((e) => e.check.winner === e.vegasFavorite).length, total: withFavorite.length },
+    },
+    margin: {
+      model: average(evals.map((e) => e.check.margin.miss)),
+      onVegasGames: average(withSpread.map((e) => e.check.margin.miss)),
+      vegas: average(withSpread.map((e) => e.check.vegasMarginMiss!)),
+      vegasGames: withSpread.length,
+    },
+    total: {
+      model: average(evals.map((e) => e.check.total.miss)),
+      onVegasGames: average(withTotal.map((e) => e.check.total.miss)),
+      vegas: average(withTotal.map((e) => e.check.vegasTotalMiss!)),
+      vegasGames: withTotal.length,
+    },
+    brier: average(decided.map((e) => (e.homeWinPct - (e.check.winner === "home" ? 1 : 0)) ** 2)),
+    calibration,
+    scoresInRange: {
+      hits: evals.reduce((n, e) => n + (e.check.home.range === "inside" ? 1 : 0) + (e.check.away.range === "inside" ? 1 : 0), 0),
+      total: evals.length * 2,
+    },
+    playersInRange: {
+      hits: evals.reduce((n, e) => n + e.players.inside, 0),
+      total: evals.reduce((n, e) => n + e.players.checked, 0),
+    },
   };
 }
