@@ -17,6 +17,7 @@ import type {
   GameDetails,
   GameState,
   Injury,
+  PlayerGame,
   RosterPlayer,
   Scoreboard,
   Team,
@@ -25,6 +26,8 @@ import type {
 } from "./types";
 
 const BASE = "https://site.api.espn.com/apis/site/v2/sports";
+// Per-player pages (game logs) live on a different host.
+const WEB_BASE = "https://site.web.api.espn.com/apis/common/v3/sports";
 
 // ---------- Raw ESPN shapes (only the fields we read) ----------
 
@@ -465,8 +468,15 @@ export async function getRoster(league: LeagueId, teamId: string): Promise<Roste
   return players;
 }
 
-// NFL depth chart: each player's best spot at QB, RB, WR or TE
-// (1 = starter, 2 = first backup...), keyed by player id.
+// The depth-chart spots we read: NFL offense ("wr1", "wr2"... are separate
+// spots) and the five NBA positions.
+const DEPTH_POSITIONS: Record<LeagueId, RegExp> = {
+  nfl: /^(qb|rb|wr\d*|te)$/,
+  nba: /^(pg|sg|sf|pf|c)$/,
+};
+
+// Depth chart: each player's best spot (1 = starter, 2 = first backup...),
+// keyed by player id.
 export async function getDepthChart(league: LeagueId, teamId: string): Promise<Record<string, number>> {
   "use cache";
   cacheLife("hours");
@@ -476,11 +486,71 @@ export async function getDepthChart(league: LeagueId, teamId: string): Promise<R
   const depth: Record<string, number> = {};
   for (const chart of data.depthchart ?? []) {
     for (const [position, { athletes }] of Object.entries(chart.positions)) {
-      if (!/^(qb|rb|wr\d*|te)$/.test(position)) continue; // "wr1", "wr2"...
+      if (!DEPTH_POSITIONS[league].test(position)) continue;
       athletes.forEach((a, i) => {
         depth[a.id] = Math.min(depth[a.id] ?? i + 1, i + 1);
       });
     }
   }
   return depth;
+}
+
+// Game-log column names -> our stat keys (see BoxScoreLine).
+const GAME_LOG_KEYS: Record<LeagueId, Record<string, string>> = {
+  nfl: {
+    passingAttempts: "passAtt",
+    passingYards: "passYds",
+    passingTouchdowns: "passTd",
+    interceptions: "int",
+    rushingAttempts: "rushAtt",
+    rushingYards: "rushYds",
+    rushingTouchdowns: "rushTd",
+    receptions: "rec",
+    receivingYards: "recYds",
+    receivingTouchdowns: "recTd",
+    receivingTargets: "tgt",
+  },
+  nba: {
+    minutes: "min",
+    points: "pts",
+    totalRebounds: "reb",
+    assists: "ast",
+    "threePointFieldGoalsMade-threePointFieldGoalsAttempted": "fg3",
+    steals: "stl",
+    blocks: "blk",
+  },
+};
+
+interface RawGameLog {
+  names?: string[];
+  events?: Record<string, { gameDate?: string }>;
+  seasonTypes?: { displayName?: string; categories?: { events?: { eventId: string; stats: string[] }[] }[] }[];
+}
+
+// One player's games in one season (any team he played for), newest first.
+// Preseason games are left out.
+export async function getPlayerGameLog(league: LeagueId, athleteId: string, season: number): Promise<PlayerGame[]> {
+  "use cache";
+  cacheLife("hours");
+  const data = await espnJson<RawGameLog>(
+    `${WEB_BASE}/${LEAGUES[league].espnPath}/athletes/${athleteId}/gamelog?season=${season}`,
+  );
+  const names = data.names ?? [];
+  const keys = GAME_LOG_KEYS[league];
+  const games: PlayerGame[] = [];
+  for (const type of data.seasonTypes ?? []) {
+    if (/preseason/i.test(type.displayName ?? "")) continue;
+    for (const category of type.categories ?? []) {
+      for (const e of category.events ?? []) {
+        const date = data.events?.[e.eventId]?.gameDate;
+        if (!date) continue;
+        const stats: Record<string, number> = {};
+        names.forEach((name, i) => {
+          if (keys[name]) stats[keys[name]] = toNumber(e.stats[i]);
+        });
+        games.push({ id: e.eventId, date, stats });
+      }
+    }
+  }
+  return games.sort((a, b) => b.date.localeCompare(a.date));
 }

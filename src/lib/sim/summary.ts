@@ -20,6 +20,7 @@ export interface PlayerProjection {
   injury?: { status: string; detail?: string };
   replacement?: boolean;
   out: boolean; // ruled out (injury report or injured reserve)
+  returning?: number; // 1 = first game back from a long absence, 2 = second...
   playPct: number; // share of simulations he played in
   stats: Record<string, StatProjection>; // only counts games he played
 }
@@ -193,6 +194,7 @@ function projections(side: SideInput, tallies: PlayerTally[], statKeys: string[]
         injury: p.injury,
         replacement: p.replacement,
         out: p.playProb === 0,
+        returning: p.returning,
         playPct: t.played / runs,
         stats,
       };

@@ -110,6 +110,14 @@ export function PlayerTables({ league, players, actual }: Props) {
                           <span className="text-xs text-muted">{p.position}</span>
                           {p.injury && <InjuryBadge status={p.injury.status} />}
                           {p.replacement && <span className="text-xs text-muted">(fills in if the starter sits)</span>}
+                          {p.returning && (
+                            <span
+                              className="text-xs text-muted"
+                              title="Coming back from a long absence, so his workload is eased"
+                            >
+                              (game {p.returning} back, lighter load)
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-2 py-1.5 text-right text-ink-2">{pct(p.playPct)}</td>

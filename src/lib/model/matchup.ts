@@ -1,11 +1,11 @@
 // Gathers everything the game page needs for one matchup.
 
-import { getDepthChart, getGameDetails, getRoster, mapLimit } from "../espn";
+import { getDepthChart, getGameDetails, getPlayerGameLog, getRoster, mapLimit } from "../espn";
 import { LEAGUES, type LeagueId } from "../leagues";
-import type { ActualResult, Game, GameDetails, Injury, TeamRating, TeamSeasonStats } from "../types";
+import type { ActualResult, Game, GameDetails, Injury, RosterPlayer, TeamRating, TeamSeasonStats } from "../types";
 import type { MatchupInput } from "../sim/types";
 import { getLeagueSnapshot, powerRanks, type LeagueSnapshot } from "./league";
-import { buildSide, type SampleGame } from "./players";
+import { buildSide, isRegular, playChance, type PlayerHistory, type SampleGame } from "./players";
 import { expectedScores } from "./ratings";
 
 export interface TeamContext {
@@ -42,8 +42,9 @@ export async function getMatchup(league: LeagueId, eventId: string): Promise<Mat
         loadSample(league, team.id, snapshot),
         getRoster(league, team.id),
         // Nice to have: without it we fall back to box-score usage.
-        league === "nfl" ? getDepthChart(league, team.id).catch(() => ({})) : {},
+        getDepthChart(league, team.id).catch(() => ({})),
       ]);
+      const history = await loadHistory(league, sample, roster, depth, injuries, snapshot.seasonYear, game.date);
       const input = buildSide({
         league,
         team,
@@ -52,6 +53,9 @@ export async function getMatchup(league: LeagueId, eventId: string): Promise<Mat
         roster,
         depth,
         injuries,
+        history,
+        teamDates: teamGames(snapshot, team.id).map((g) => g.date),
+        gameDate: game.date,
       });
       const context: TeamContext = {
         rating: snapshot.ratings.ratings[team.id] ?? { teamId: team.id, offense: 0, defense: 0, net: 0 },
@@ -96,11 +100,9 @@ function actualResult({ game, boxScore }: GameDetails): ActualResult | undefined
 // (early season), top up with the end of last season at half weight.
 async function loadSample(league: LeagueId, teamId: string, snapshot: LeagueSnapshot): Promise<SampleGame[]> {
   const wanted = LEAGUES[league].playerSampleGames;
-  const teamGames = snapshot.completedGames
-    .filter((g) => g.home.team.id === teamId || g.away.team.id === teamId)
-    .reverse(); // newest first
-  const current = teamGames.filter((g) => g.seasonYear === snapshot.seasonYear).slice(0, wanted);
-  const previous = teamGames
+  const games = teamGames(snapshot, teamId);
+  const current = games.filter((g) => g.seasonYear === snapshot.seasonYear).slice(0, wanted);
+  const previous = games
     .filter((g) => g.seasonYear < snapshot.seasonYear)
     .slice(0, Math.max(0, wanted - current.length));
 
@@ -110,9 +112,10 @@ async function loadSample(league: LeagueId, teamId: string, snapshot: LeagueSnap
   ];
   const sample = await mapLimit(chosen, 6, async ({ game, weight }) => {
     const box = await getGameDetails(league, game.id).catch(() => undefined);
-    if (!box) return { lines: [], benched: [], teamPoints: 0, weight }; // ESPN lost this one
+    if (!box) return { id: game.id, lines: [], benched: [], teamPoints: 0, weight }; // ESPN lost this one
     const side = game.home.team.id === teamId ? game.home : game.away;
     return {
+      id: game.id,
       lines: box.boxScore[teamId] ?? [],
       benched: box.benched?.[teamId] ?? [], // missing in box scores cached before this field existed
       teamPoints: side.score ?? 0,
@@ -121,4 +124,54 @@ async function loadSample(league: LeagueId, teamId: string, snapshot: LeagueSnap
   });
   // Ignore any game ESPN has no box score for (or won't send at all).
   return sample.filter((g) => g.lines.length > 0);
+}
+
+// The team's finished games before this one, newest first.
+function teamGames(snapshot: LeagueSnapshot, teamId: string): Game[] {
+  return snapshot.completedGames.filter((g) => g.home.team.id === teamId || g.away.team.id === teamId).reverse();
+}
+
+// Healthy regulars who missed some of the sampled games (back from injury, or
+// just traded here) are topped up with their own most recent games from
+// ESPN's per-player game log, up to the usual number of games.
+async function loadHistory(
+  league: LeagueId,
+  sample: SampleGame[],
+  roster: RosterPlayer[],
+  depth: Record<string, number>,
+  injuries: Injury[],
+  seasonYear: number,
+  before: string, // only games before this date
+): Promise<Record<string, PlayerHistory>> {
+  const wanted = LEAGUES[league].playerSampleGames;
+  const injuryById = new Map(injuries.map((i) => [i.playerId, i]));
+  const sampleIds = new Set(sample.map((g) => g.id));
+  const needed = roster
+    .map((r) => ({ r, played: sample.filter((g) => g.lines.some((l) => l.playerId === r.id)).length }))
+    .filter(({ r, played }) => {
+      const injury = injuryById.get(r.id);
+      const healthy = !r.unavailable && (!injury || playChance(injury.status) > 0);
+      return healthy && isRegular(league, r.position, depth[r.id]) && played < sample.length;
+    });
+
+  // This season counts fully and last season half, like the team's games.
+  const seasons = [
+    { season: seasonYear, weight: 1 },
+    { season: seasonYear - 1, weight: 0.5 },
+  ];
+  const results = await mapLimit(needed, 4, async ({ r, played }) => {
+    const logs = await Promise.all(
+      seasons.map(({ season }) => getPlayerGameLog(league, r.id, season).catch(() => [])),
+    );
+    const games = seasons.flatMap(({ weight }, i) =>
+      logs[i].filter((g) => Date.parse(g.date) < Date.parse(before)).map((g) => ({ ...g, weight })),
+    );
+    const history: PlayerHistory = {
+      // Games already in the sample are counted there.
+      extra: games.filter((g) => !sampleIds.has(g.id)).slice(0, Math.max(0, wanted - played)),
+      dates: games.map((g) => g.date),
+    };
+    return [r.id, history] as const;
+  });
+  return Object.fromEntries(results);
 }

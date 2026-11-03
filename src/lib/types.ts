@@ -89,6 +89,13 @@ export interface BoxScoreLine {
   stats: Record<string, number>;
 }
 
+// One game from a player's own game log (any team he was on).
+export interface PlayerGame {
+  id: string; // ESPN event id
+  date: string;
+  stats: Record<string, number>; // same keys as BoxScoreLine.stats
+}
+
 export interface GameDetails {
   game: Game;
   // Player lines for each team, keyed by team id (empty before the game).

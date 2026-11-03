@@ -16,6 +16,9 @@ export interface PlayerInput {
   rolePct: number;
   // NFL depth chart spot: 1 = starter, 2 = first backup... (if listed).
   depth?: number;
+  // Back from a long absence: 1 = first game back, 2 = second... (only while
+  // his workload is still eased, see RUST_WORKLOAD). avg is already lowered.
+  returning?: number;
   injury?: { status: string; detail?: string };
   gamesPlayed: number; // games in our sample that he played in
   // His per-game averages when he plays. Keys match LEAGUES[league].playerStats
