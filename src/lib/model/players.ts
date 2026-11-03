@@ -2,7 +2,7 @@
 
 import type { LeagueId } from "../leagues";
 import type { BoxScoreLine, Injury, RosterPlayer, Team } from "../types";
-import type { PlayerInput, SideInput } from "../sim/types";
+import type { Adjustment, PlayerInput, SideInput } from "../sim/types";
 
 export interface SampleGame {
   id: string;
@@ -16,7 +16,7 @@ export interface SampleGame {
 // traded here): his own games from ESPN's game log.
 export interface PlayerHistory {
   extra: { stats: Record<string, number>; weight: number }[]; // added to his averages
-  played: { id: string; date: string }[]; // every recent game he played (any team), newest first
+  played: { id: string; date: string; teamId: string }[]; // every recent game he played (any team), newest first
 }
 
 // One of the team's finished games, weighted the way the team ratings weigh it.
@@ -65,8 +65,10 @@ export function buildSide(args: {
   history: Record<string, PlayerHistory>;
   teamGames: TeamGame[]; // the team's finished games, newest first
   gameDate: string; // the game being simulated
+  adjustments?: Adjustment[]; // rest, weather: added to expectedPoints
 }): SideInput {
-  const { league, team, expectedPoints, sample, roster, depth, injuries, history, teamGames, gameDate } = args;
+  const { league, team, sample, roster, depth, injuries, history, teamGames, gameDate, adjustments = [] } = args;
+  const expectedPoints = args.expectedPoints + adjustments.reduce((sum, a) => sum + a.points, 0);
   const totalWeight = sample.reduce((sum, g) => sum + g.weight, 0) || 1;
 
   // Add up every stat, per player and for the whole team.
@@ -149,7 +151,7 @@ export function buildSide(args: {
       gamesPlayed: p.games.length + (history[id]?.extra.length ?? 0),
       avg,
       impact: playerImpact(league, avg, teamAvg),
-      ratedShare: ratedShare(sample, p.games, history[id], teamGames),
+      ratedShare: ratedShare(team.id, sample, p.games, history[id], teamGames),
     });
   }
 
@@ -169,6 +171,7 @@ export function buildSide(args: {
   return {
     team,
     expectedPoints,
+    adjustments,
     avgPoints: pointSum / totalWeight,
     teamAvg,
     // Pulled toward the league-typical ~60% so a small sample can't say 100%.
@@ -232,25 +235,37 @@ function gamesBack(
 // of the team's rated games he played, weighted like the ratings. A starter
 // who has played every game is fully "in" (1); one back from a two-month
 // injury is mostly not, so his return lifts the team.
+//
+// Only games since his first one with this team count. A player who just
+// arrived doesn't lift the team: we can't see who he replaced (players who
+// left aren't on the roster any more), and the rating catches up as he plays.
 function ratedShare(
+  teamId: string,
   sample: SampleGame[],
-  games: number[], // indexes into sample where he played
+  games: number[], // indexes into sample (newest first) where he played
   history: PlayerHistory | undefined,
-  teamGames: TeamGame[],
+  teamGames: TeamGame[], // newest first
 ): number {
-  const sampleTotal = sample.reduce((sum, g) => sum + g.weight, 0);
-  const sampleShare = sampleTotal ? games.reduce((sum, g) => sum + sample[g].weight, 0) / sampleTotal : 0;
-  const inSample = new Set(sample.map((g) => g.id));
-  const playedIds = new Set([...games.map((g) => sample[g].id), ...(history?.played.map((g) => g.id) ?? [])]);
+  // Games he played for this team. (Both teams share a game's id, so his
+  // games against us for another team must not count.)
+  const forUs = history?.played.filter((g) => g.teamId === teamId).map((g) => g.id) ?? [];
+  const playedIds = new Set([...games.map((g) => sample[g].id), ...forUs]);
+  // Without his game log we only know the sample since he first appeared in
+  // it; assume earlier games went the same way.
+  const known = new Set(sample.slice(0, Math.max(-1, ...games) + 1).map((g) => g.id));
+  const knownTotal = sample.filter((g) => known.has(g.id)).reduce((sum, g) => sum + g.weight, 0);
+  const usual = knownTotal ? games.reduce((sum, g) => sum + sample[g].weight, 0) / knownTotal : 1;
+
+  const first = teamGames.findLastIndex((g) => playedIds.has(g.id)); // his oldest game with us
+  const counted = history ? teamGames.slice(0, first + 1) : teamGames;
   let played = 0;
   let total = 0;
-  for (const g of teamGames) {
-    // Older games without his game log: assume he played as often as lately.
-    const share = inSample.has(g.id) || history ? (playedIds.has(g.id) ? 1 : 0) : sampleShare;
+  for (const g of counted) {
+    const share = history || known.has(g.id) ? (playedIds.has(g.id) ? 1 : 0) : usual;
     played += g.weight * share;
     total += g.weight;
   }
-  return total ? played / total : sampleShare;
+  return total ? played / total : 1;
 }
 
 // Skip players who barely see the field.

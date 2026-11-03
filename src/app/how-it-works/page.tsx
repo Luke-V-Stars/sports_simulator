@@ -24,6 +24,14 @@ export default function HowItWorks() {
         For a matchup, a team is expected to score:{" "}
         <em>league average + its offense rating − the opponent&apos;s defense rating</em>, plus a small bonus for the
         home team (about 1.8 points in the NFL and 2.4 in the NBA, split between the teams).
+        <p className="mt-2">
+          Then game conditions nudge it. <strong>Rest:</strong> an NBA team on the second night of a back-to-back
+          loses about 2 points of margin (1 off its own score, 1 added to the opponent&apos;s); an NFL team on a short
+          week (5 days or less) loses about 1, and one coming off a bye gains about 1.{" "}
+          <strong>Weather</strong> (outdoor NFL stadiums, from the free Open-Meteo service): each mph of wind above
+          10 costs each team 0.15 points (up to 3), heavy rain or snow 0.75, and temperatures below 25°F 0.5. These
+          are rough estimates, deliberately kept small.
+        </p>
       </Step>
 
       <Step n={4} title="Decide who plays">
@@ -69,8 +77,9 @@ export default function HowItWorks() {
 
       <section className="rounded-xl border border-edge bg-surface p-4 text-sm text-ink-2">
         <h2 className="mb-1 font-semibold text-ink">What it doesn&apos;t know</h2>
-        Weather, rest days and travel, and coaching changes. Backups new to a team, and rookies with no games yet,
-        are left out. It also uses ESPN&apos;s unofficial feeds, which could change without notice. Treat
+        Travel, altitude, coaching changes, and how much a newly traded player lifts his new team (he gets his share
+        of the stats, but the team&apos;s expected points only catch up as he plays). Backups new to a team, and
+        rookies with no games yet, are left out. It also uses ESPN&apos;s unofficial feeds, which could change without notice. Treat
         the numbers as an educated estimate, and compare them with the Vegas lines shown on each game.
       </section>
 

@@ -4,7 +4,9 @@ import { getDepthChart, getGameDetails, getPlayerGameLog, getRoster, mapLimit } 
 import { LEAGUES, type LeagueId } from "../leagues";
 import type { ActualResult, Game, GameDetails, Injury, RosterPlayer, TeamRating, TeamSeasonStats } from "../types";
 import type { MatchupInput } from "../sim/types";
-import { getLeagueSnapshot, powerRanks, type LeagueSnapshot } from "./league";
+import { getGameWeather, type GameWeather } from "../weather";
+import { restAdjustments, weatherAdjustments } from "./conditions";
+import { getLeagueSnapshot, getSeasonGames, powerRanks, type LeagueSnapshot } from "./league";
 import { buildSide, isRegular, playChance, type PlayerHistory, type SampleGame } from "./players";
 import { expectedScores, ratingWeight } from "./ratings";
 
@@ -23,6 +25,7 @@ export interface MatchupData {
   away: TeamContext;
   teamCount: number;
   leagueAverage: number;
+  weather?: GameWeather; // outdoor NFL games only
   actual?: ActualResult; // only for finished games
 }
 
@@ -33,6 +36,13 @@ export async function getMatchup(league: LeagueId, eventId: string): Promise<Mat
   const snapshot = await getLeagueSnapshot(league, game.seasonYear, game.date);
   const expected = expectedScores(league, snapshot.ratings, game.home.team.id, game.away.team.id, game.neutralSite);
   const ranks = powerRanks(snapshot);
+  // Game conditions: rest for each team (from the whole schedule, since games
+  // between now and a future game count too), weather for both.
+  const [schedule, weather] = await Promise.all([
+    getSeasonGames(league, game.seasonYear),
+    league === "nfl" ? getGameWeather(game.venueLocation, game.date) : undefined,
+  ]);
+  const rest = restAdjustments(league, game, schedule);
 
   const [home, away] = await Promise.all(
     (["home", "away"] as const).map(async (side) => {
@@ -60,6 +70,7 @@ export async function getMatchup(league: LeagueId, eventId: string): Promise<Mat
           weight: ratingWeight(league, g, snapshot.seasonYear, snapshot.asOf),
         })),
         gameDate: game.date,
+        adjustments: [...rest[side], ...weatherAdjustments(weather)],
       });
       const context: TeamContext = {
         rating: snapshot.ratings.ratings[team.id] ?? { teamId: team.id, offense: 0, defense: 0, net: 0 },
@@ -84,6 +95,7 @@ export async function getMatchup(league: LeagueId, eventId: string): Promise<Mat
     away: away.context,
     teamCount: snapshot.teams.length,
     leagueAverage: snapshot.ratings.leagueAverage,
+    weather,
     actual: actualResult(details),
   };
 }
@@ -173,7 +185,7 @@ async function loadHistory(
     const history: PlayerHistory = {
       // Games already in the sample are counted there.
       extra: games.filter((g) => !sampleIds.has(g.id)).slice(0, Math.max(0, wanted - played)),
-      played: games.map(({ id, date }) => ({ id, date })),
+      played: games.map(({ id, date, teamId }) => ({ id, date, teamId })),
     };
     return [r.id, history] as const;
   });

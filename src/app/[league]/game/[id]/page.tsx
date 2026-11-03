@@ -132,7 +132,7 @@ function TeamComparison({ data }: { data: MatchupData }) {
       home: home.stats ? fixed(home.stats.pointsAgainst, 1) : "–",
     },
     {
-      label: "Expected points (before lineup changes)",
+      label: "Expected points (with rest and weather, before lineup changes)",
       away: fixed(data.input.away.expectedPoints, 1),
       home: fixed(data.input.home.expectedPoints, 1),
     },
@@ -160,7 +160,47 @@ function TeamComparison({ data }: { data: MatchupData }) {
         </tbody>
       </table>
       <p className="mt-2 text-xs text-muted">Ratings are points better (+) or worse (–) than an average team.</p>
+      <GameConditions data={data} />
     </section>
+  );
+}
+
+// Rest and weather, already included in the expected points above.
+function GameConditions({ data }: { data: MatchupData }) {
+  const { game, weather } = data;
+  const sides = [
+    { abbr: game.away.team.abbr, adjustments: data.input.away.adjustments },
+    { abbr: game.home.team.abbr, adjustments: data.input.home.adjustments },
+  ];
+  const any = sides.some((s) => s.adjustments.length > 0);
+  if (!weather && !any) return null;
+  return (
+    <div className="mt-4 border-t border-line pt-3 text-sm">
+      <h3 className="mb-1 font-semibold">Game conditions</h3>
+      {weather && (
+        <p className="text-ink-2">
+          Weather during the game: {Math.round(weather.tempF)}°F, wind {Math.round(weather.windMph)} mph
+          {weather.precipMm >= 0.2 ? ", rain or snow" : ""}
+          {game.state === "pre" ? " (forecast)" : ""}.
+        </p>
+      )}
+      {any ? (
+        <ul className="mt-1 flex flex-col gap-0.5">
+          {sides.flatMap(({ abbr, adjustments }) =>
+            adjustments.map((a) => (
+              <li key={`${abbr}-${a.label}`} className="flex justify-between gap-2">
+                <span>
+                  <span className="font-medium">{abbr}</span> <span className="text-ink-2">{a.label}</span>
+                </span>
+                <span className="tabular font-medium">{signed(a.points)} pts</span>
+              </li>
+            )),
+          )}
+        </ul>
+      ) : (
+        <p className="text-ink-2">No effect on the expected score.</p>
+      )}
+    </div>
   );
 }
 

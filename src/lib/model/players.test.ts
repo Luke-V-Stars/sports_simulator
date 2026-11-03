@@ -130,7 +130,8 @@ describe("players returning from a long absence", () => {
   const rb = { rushAtt: 15, rushYds: 70, rec: 2, recYds: 15, tgt: 3 };
   // The team played every week; its newest 8 games are the sample (g0-g7).
   const teamGames = Array.from({ length: 16 }, (_, i) => ({ id: `g${i}`, date: daysAgo(7 + 7 * i), weight: 1 }));
-  const playedTeamGames = (...indexes: number[]) => indexes.map((i) => ({ id: teamGames[i].id, date: teamGames[i].date }));
+  const playedTeamGames = (...indexes: number[]) =>
+    indexes.map((i) => ({ id: teamGames[i].id, date: teamGames[i].date, teamId: TEAM.id }));
   const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
   const extra = Array.from({ length: 8 }, () => ({ stats: rb, weight: 1 }));
   const args = { sample: sampleGames(8, () => []), roster: roster(["rb1", "RB"]), depth: { rb1: 1 }, teamGames };
@@ -161,13 +162,27 @@ describe("players returning from a long absence", () => {
     expect(rb1?.ratedShare).toBe(1);
   });
 
-  it("doesn't treat a trade as an absence, but the new team's rating lacks him", () => {
+  it("doesn't treat a trade as an absence, or as a lift for his new team", () => {
     // Played every week for another team (a day before each of ours).
-    const played = teamGames.map((g, i) => ({ id: `other${i}`, date: daysAgo(8 + 7 * i) }));
+    const played = teamGames.map((g, i) => ({ id: `other${i}`, date: daysAgo(8 + 7 * i), teamId: "2" }));
     const rb1 = player(build("nfl", { ...args, history: { rb1: { extra, played } } }), "rb1");
     expect(rb1?.returning).toBeUndefined();
     expect(rb1?.avg.rushYds).toBeCloseTo(70);
-    expect(rb1?.ratedShare).toBe(0);
+    // We can't see who he replaced, so he doesn't move the team's score.
+    expect(rb1?.ratedShare).toBe(1);
+  });
+
+  it("counts only games since he joined the team", () => {
+    // Joined 6 weeks ago (other team before that, including a game against
+    // us, which shares our game's id), then hurt for 3 weeks.
+    const played = [
+      ...playedTeamGames(3, 4, 5),
+      ...Array.from({ length: 8 }, (_, i) => ({ id: `other${i}`, date: daysAgo(50 + 7 * i), teamId: "2" })),
+      { id: teamGames[10].id, date: teamGames[10].date, teamId: "2" },
+    ];
+    const rb1 = player(build("nfl", { ...args, history: { rb1: { extra, played } } }), "rb1");
+    expect(rb1?.ratedShare).toBeCloseTo(3 / 6);
+    expect(rb1?.returning).toBe(1);
   });
 });
 
@@ -185,6 +200,13 @@ describe("how much of a player is in the team rating", () => {
     const sample = sampleGames(8, (g) => (g % 2 ? [line("wr1", wr, "WR")] : []));
     const side = build("nfl", { sample, roster: roster(["wr1", "WR"]), depth: { wr1: 1 }, teamGames });
     expect(player(side, "wr1")?.ratedShare).toBeCloseTo(0.5);
+  });
+
+  it("doesn't count sample games from before a player first showed up", () => {
+    // Newest 3 games only (arrived recently): fully part of the team since.
+    const sample = sampleGames(8, (g) => (g < 3 ? [line("wr9", wr, "WR")] : []));
+    const side = build("nfl", { sample, roster: roster(["wr9", "WR"]), depth: { wr9: 3 }, teamGames });
+    expect(player(side, "wr9")?.ratedShare).toBe(1);
   });
 
   it("gives backup quarterbacks no value of their own", () => {

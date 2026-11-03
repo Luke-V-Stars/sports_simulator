@@ -33,6 +33,7 @@ export interface Game {
   home: GameSide;
   away: GameSide;
   venue?: string;
+  venueLocation?: string; // "Green Bay|WI": city and state (or country)
   broadcast?: string;
   // Betting line from ESPN's odds provider, e.g. { favorite: "DAL", line: 4.5 }
   vegas?: VegasLine;
@@ -93,6 +94,7 @@ export interface BoxScoreLine {
 export interface PlayerGame {
   id: string; // ESPN event id
   date: string;
+  teamId: string; // the team he played for that day
   stats: Record<string, number>; // same keys as BoxScoreLine.stats
 }
 

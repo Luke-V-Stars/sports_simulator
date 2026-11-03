@@ -59,9 +59,14 @@ interface RawCompetition {
   neutralSite?: boolean;
   competitors: RawCompetitor[];
   status?: RawStatus;
-  venue?: { fullName?: string };
+  venue?: RawVenue;
   broadcast?: string;
   odds?: RawOdds[];
+}
+
+interface RawVenue {
+  fullName?: string;
+  address?: { city?: string; state?: string; country?: string };
 }
 
 interface RawOdds {
@@ -106,7 +111,7 @@ interface RawSummary {
     season: { year: number; type: number };
     competitions: (RawCompetition & { id: string })[];
   };
-  gameInfo?: { venue?: { fullName?: string } };
+  gameInfo?: { venue?: RawVenue };
   pickcenter?: RawOdds[];
   boxscore?: { players?: { team: { id: string }; statistics: RawBoxCategory[] }[] };
   injuries?: {
@@ -160,6 +165,12 @@ function parseVegas(odds: RawOdds | undefined): VegasLine | undefined {
   return undefined;
 }
 
+// "Green Bay|WI", "London|England": the key lib/weather.ts looks stadiums up by.
+function venueLocation(venue?: RawVenue): string | undefined {
+  const a = venue?.address;
+  return a?.city ? `${a.city}|${a.state ?? a.country ?? ""}` : undefined;
+}
+
 function parseCompetition(
   league: LeagueId,
   id: string,
@@ -193,6 +204,7 @@ function parseCompetition(
     home: side("home"),
     away: side("away"),
     venue: comp.venue?.fullName,
+    venueLocation: venueLocation(comp.venue),
     broadcast: comp.broadcast,
     vegas: parseVegas(comp.odds?.[0]),
   };
@@ -314,6 +326,7 @@ export async function getGameDetails(league: LeagueId, eventId: string): Promise
   const comp = data.header.competitions[0];
   const game = parseCompetition(league, data.header.id, data.header.season, comp, comp.status!);
   game.venue = data.gameInfo?.venue?.fullName ?? game.venue;
+  game.venueLocation = venueLocation(data.gameInfo?.venue) ?? game.venueLocation;
   game.vegas = parseVegas(data.pickcenter?.[0]) ?? game.vegas;
 
   const boxScore: Record<string, BoxScoreLine[]> = {};
@@ -523,7 +536,7 @@ const GAME_LOG_KEYS: Record<LeagueId, Record<string, string>> = {
 
 interface RawGameLog {
   names?: string[];
-  events?: Record<string, { gameDate?: string }>;
+  events?: Record<string, { gameDate?: string; homeTeamId?: string; awayTeamId?: string; opponent?: { id?: string } }>;
   seasonTypes?: { displayName?: string; categories?: { events?: { eventId: string; stats: string[] }[] }[] }[];
 }
 
@@ -542,13 +555,16 @@ export async function getPlayerGameLog(league: LeagueId, athleteId: string, seas
     if (/preseason/i.test(type.displayName ?? "")) continue;
     for (const category of type.categories ?? []) {
       for (const e of category.events ?? []) {
-        const date = data.events?.[e.eventId]?.gameDate;
+        const event = data.events?.[e.eventId];
+        const date = event?.gameDate;
         if (!date) continue;
+        // His team is whichever side isn't the opponent.
+        const teamId = event.homeTeamId === event.opponent?.id ? event.awayTeamId : event.homeTeamId;
         const stats: Record<string, number> = {};
         names.forEach((name, i) => {
           if (keys[name]) stats[keys[name]] = toNumber(e.stats[i]);
         });
-        games.push({ id: e.eventId, date, stats });
+        games.push({ id: e.eventId, date, teamId: teamId ?? "", stats });
       }
     }
   }

@@ -34,9 +34,18 @@ export interface PlayerInput {
   replacement?: boolean;
 }
 
+// A change to a team's expected points from game conditions (rest, weather).
+export interface Adjustment {
+  label: string; // "Back-to-back (2nd night)"
+  points: number; // added to this team's expected points
+}
+
 export interface SideInput {
   team: Team;
-  expectedPoints: number; // from team ratings, before injuries
+  // From team ratings plus `adjustments`, before lineup changes (injuries,
+  // players returning), which each simulated game applies itself.
+  expectedPoints: number;
+  adjustments: Adjustment[];
   avgPoints: number; // average points in the games we sampled players from
   teamAvg: Record<string, number>; // team totals per game (e.g. passing yards)
   passTdShare: number; // NFL: share of touchdowns that are passing touchdowns
