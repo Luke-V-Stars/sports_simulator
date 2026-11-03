@@ -7,7 +7,14 @@ import type { MatchupInput } from "../sim/types";
 import { getGameWeather, type GameWeather } from "../weather";
 import { matchupFactors, restAdjustments, weatherAdjustments } from "./conditions";
 import { getLeagueSnapshot, getSeasonGames, powerRanks, type LeagueSnapshot } from "./league";
-import { buildSide, isRegular, playChance, type PlayerHistory, type SampleGame } from "./players";
+import {
+  buildSide,
+  injuriesAtKickoff,
+  isRegular,
+  playChance,
+  type PlayerHistory,
+  type SampleGame,
+} from "./players";
 import { expectedScores, ratingWeight } from "./ratings";
 
 export interface TeamContext {
@@ -47,13 +54,13 @@ export async function getMatchup(league: LeagueId, eventId: string): Promise<Mat
   const [home, away] = await Promise.all(
     (["home", "away"] as const).map(async (side) => {
       const team = game[side].team;
-      const injuries = details.injuries[team.id] ?? [];
-      const [sample, roster, depth] = await Promise.all([
+      const [sample, currentRoster, depth] = await Promise.all([
         loadSample(league, team.id, snapshot),
         getRoster(league, team.id),
         // Nice to have: without it we fall back to box-score usage.
         getDepthChart(league, team.id).catch(() => ({})),
       ]);
+      const { roster, injuries } = injuriesAtKickoff(currentRoster, details.injuries[team.id] ?? [], game.date);
       const history = await loadHistory(league, sample, roster, depth, injuries, snapshot.seasonYear, game.date);
       const input = buildSide({
         league,

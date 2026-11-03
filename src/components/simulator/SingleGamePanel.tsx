@@ -8,17 +8,16 @@ import type { BoxLine, SingleGame } from "@/lib/sim/summary";
 
 interface Props {
   league: LeagueId;
-  games: SingleGame[]; // newest first
+  games: SingleGame[]; // newest first (only the most recent 100)
+  record: { home: number; away: number; ties: number }; // every game played
   homeAbbr: string;
   awayAbbr: string;
   onPlay: () => void;
 }
 
-export function SingleGamePanel({ league, games, homeAbbr, awayAbbr, onPlay }: Props) {
+export function SingleGamePanel({ league, games, record, homeAbbr, awayAbbr, onPlay }: Props) {
   const latest = games[0];
-  const homeWins = games.filter((g) => !g.tie && g.homeScore > g.awayScore).length;
-  const awayWins = games.filter((g) => !g.tie && g.awayScore > g.homeScore).length;
-  const ties = games.filter((g) => g.tie).length;
+  const { home: homeWins, away: awayWins, ties } = record;
 
   return (
     <div className="flex flex-col gap-4">
@@ -54,7 +53,7 @@ export function SingleGamePanel({ league, games, homeAbbr, awayAbbr, onPlay }: P
             </p>
             <div className="flex flex-wrap gap-1.5">
               {games.slice(0, 30).map((g, i) => (
-                <span key={games.length - i} className="tabular rounded bg-surface-2 px-2 py-0.5 text-xs text-ink-2">
+                <span key={homeWins + awayWins + ties - i}className="tabular rounded bg-surface-2 px-2 py-0.5 text-xs text-ink-2">
                   {g.awayScore}–{g.homeScore}
                   {g.overtimes > 0 ? " OT" : ""}
                 </span>

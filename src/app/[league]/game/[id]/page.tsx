@@ -6,7 +6,7 @@ import { BlockSkeleton } from "@/components/Skeleton";
 import { TeamLogo } from "@/components/TeamLogo";
 import { fixed, gameTime, signed } from "@/lib/format";
 import { isLeagueId, LEAGUES } from "@/lib/leagues";
-import { matchupLabels } from "@/lib/model/conditions";
+import { matchupLabels, WET_MM_PER_HOUR } from "@/lib/model/conditions";
 import { getMatchup, type MatchupData, type TeamContext } from "@/lib/model/matchup";
 import { formatRecord } from "@/lib/model/ratings";
 import type { GameSide } from "@/lib/types";
@@ -184,7 +184,7 @@ function GameConditions({ data }: { data: MatchupData }) {
       {weather && (
         <p className="text-ink-2">
           Weather during the game: {Math.round(weather.tempF)}°F, wind {Math.round(weather.windMph)} mph
-          {weather.precipMm >= 0.2 ? ", rain or snow" : ""}
+          {weather.precipMm >= WET_MM_PER_HOUR ? ", rain or snow" : weather.precipMm >= 0.2 ? ", light rain or snow" : ""}
           {game.state === "pre" ? " (forecast)" : ""}.
         </p>
       )}
@@ -254,6 +254,8 @@ function InjuryReport({ data }: { data: MatchupData }) {
       <p className="mt-3 text-xs text-muted">
         In each simulated game, &quot;Out&quot; players never play, &quot;Doubtful&quot; play 25% of the time,
         &quot;Questionable&quot; 50%, and &quot;Day-To-Day&quot; 65%.
+        {data.game.state !== "pre" &&
+          " ESPN only keeps each player's latest injury news, so for a game already played this is today's report minus anything updated after kickoff."}
       </p>
     </section>
   );

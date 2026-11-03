@@ -3,6 +3,7 @@ import type { LeagueId } from "../leagues";
 import type { BoxScoreLine, Injury, RosterPlayer } from "../types";
 import {
   buildSide,
+  injuriesAtKickoff,
   playChance,
   RUST_WORKLOAD,
   type PlayerHistory,
@@ -218,5 +219,53 @@ describe("how much of a player is in the team rating", () => {
     const side = build("nfl", { sample, roster: roster(["qb1", "QB"], ["qb2", "QB"]), depth: { qb1: 1, qb2: 2 } });
     expect(player(side, "qb1")?.impact).toBeGreaterThan(5);
     expect(player(side, "qb2")?.impact).toBe(0);
+  });
+});
+
+describe("injuriesAtKickoff", () => {
+  const kickoff = "2026-10-01T17:00Z";
+  const before = "2026-09-28T12:00Z";
+  const after = "2026-10-20T12:00Z";
+  const rosterPlayer = (id: string, injury?: { status: string; date?: string }, unavailable = false): RosterPlayer => ({
+    id,
+    name: `Player ${id}`,
+    position: "WR",
+    unavailable,
+    injury,
+  });
+
+  it("uses the full roster, not just the game page's five", () => {
+    const roster = ["a", "b", "c", "d", "e", "f"].map((id) => rosterPlayer(id, { status: "Out", date: before }));
+    const reported: Injury[] = ["a", "b", "c", "d", "e"].map((id) => ({
+      playerId: id,
+      name: `Player ${id}`,
+      status: "Out",
+      detail: "Ankle",
+      date: before,
+    }));
+    const { injuries } = injuriesAtKickoff(roster, reported, kickoff);
+    expect(injuries.map((i) => i.playerId).sort()).toEqual(["a", "b", "c", "d", "e", "f"]);
+    expect(injuries.find((i) => i.playerId === "a")?.detail).toBe("Ankle"); // details kept
+  });
+
+  it("leaves out injury news from after kickoff", () => {
+    const roster = [rosterPlayer("old", { status: "Out", date: before }), rosterPlayer("new", { status: "Out", date: after })];
+    const { injuries } = injuriesAtKickoff(roster, [], kickoff);
+    expect(injuries.map((i) => i.playerId)).toEqual(["old"]);
+  });
+
+  it("counts a player put on injured reserve after kickoff as available", () => {
+    const roster = [
+      rosterPlayer("earlyIR", { status: "Injured Reserve", date: before }, true),
+      rosterPlayer("lateIR", { status: "Injured Reserve", date: after }, true),
+    ];
+    const result = injuriesAtKickoff(roster, [], kickoff);
+    expect(result.roster.find((r) => r.id === "earlyIR")?.unavailable).toBe(true);
+    expect(result.roster.find((r) => r.id === "lateIR")?.unavailable).toBe(false);
+  });
+
+  it("keeps everything for an upcoming game", () => {
+    const roster = [rosterPlayer("a", { status: "Questionable", date: before })];
+    expect(injuriesAtKickoff(roster, [], "2026-12-01T18:00Z").injuries).toHaveLength(1);
   });
 });

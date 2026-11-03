@@ -11,6 +11,7 @@
 
 import { cacheLife } from "next/cache";
 import { LEAGUES, type LeagueId } from "./leagues";
+import { statNumber } from "./parse";
 import type {
   BoxScoreLine,
   Game,
@@ -97,6 +98,7 @@ interface RawAthlete {
   position?: { abbreviation?: string };
   headshot?: { href?: string };
   jersey?: string;
+  injuries?: { status?: string; date?: string }[]; // on team rosters
 }
 
 interface RawBoxCategory {
@@ -116,7 +118,7 @@ interface RawSummary {
   boxscore?: { players?: { team: { id: string }; statistics: RawBoxCategory[] }[] };
   injuries?: {
     team: { id: string };
-    injuries: { athlete: RawAthlete; status: string; details?: { type?: string; detail?: string } }[];
+    injuries: { athlete: RawAthlete; status: string; date?: string; details?: { type?: string; detail?: string } }[];
   }[];
 }
 
@@ -337,6 +339,9 @@ export async function getGameDetails(league: LeagueId, eventId: string): Promise
     benched[teamBox.team.id] = league === "nba" ? coachBenched(teamBox.statistics) : [];
   }
 
+  // Careful: ESPN lists only the 5 most recently updated injuries per team
+  // here, and always today's report (even for an old game). getMatchup
+  // combines this with the full roster and drops what came after kickoff.
   const injuries: Record<string, Injury[]> = {};
   for (const teamInj of data.injuries ?? []) {
     injuries[teamInj.team.id] = teamInj.injuries.map((i) => ({
@@ -345,6 +350,7 @@ export async function getGameDetails(league: LeagueId, eventId: string): Promise
       position: i.athlete.position?.abbreviation,
       status: i.status,
       detail: injuryDetail(i.details?.type, i.details?.detail),
+      date: i.date,
     }));
   }
 
@@ -358,12 +364,6 @@ export async function getGameDetails(league: LeagueId, eventId: string): Promise
 function injuryDetail(type?: string, detail?: string): string | undefined {
   const parts = [type, detail].filter((p): p is string => !!p && p !== "Not Specified");
   return [...new Set(parts)].join(" – ") || undefined;
-}
-
-function toNumber(value: string | undefined): number {
-  if (!value) return 0;
-  const n = Number(value.split(/[-/]/)[0]); // "3-5" -> 3 (made threes)
-  return Number.isFinite(n) ? n : 0;
 }
 
 function parseNbaBox(categories: RawBoxCategory[]): BoxScoreLine[] {
@@ -384,7 +384,7 @@ function parseNbaBox(categories: RawBoxCategory[]): BoxScoreLine[] {
     if (a.didNotPlay || !a.stats?.length) continue;
     const stats: Record<string, number> = {};
     for (const [key, index] of Object.entries(columns)) {
-      stats[key] = index >= 0 ? toNumber(a.stats[index]) : 0;
+      stats[key] = index >= 0 ? statNumber(a.stats[index]) : 0;
     }
     if (stats.min <= 0) continue;
     lines.push({
@@ -445,7 +445,7 @@ function parseNflBox(categories: RawBoxCategory[]): BoxScoreLine[] {
         if (index < 0) continue;
         const raw = a.stats[index];
         // "24/31" completions/attempts -> we want the attempts (31)
-        line.stats[key] = key === "passAtt" ? Number(raw?.split("/")[1] ?? 0) || 0 : toNumber(raw);
+        line.stats[key] = key === "passAtt" ? Number(raw?.split("/")[1] ?? 0) || 0 : statNumber(raw);
       }
     }
   }
@@ -459,7 +459,8 @@ export async function getRoster(league: LeagueId, teamId: string): Promise<Roste
     `${BASE}/${LEAGUES[league].espnPath}/teams/${teamId}/roster`,
   );
   const players: RosterPlayer[] = [];
-  const add = (a: RawAthlete, unavailable: boolean) =>
+  const add = (a: RawAthlete, unavailable: boolean) => {
+    const injury = a.injuries?.find((i) => i.status);
     players.push({
       id: a.id,
       name: a.displayName,
@@ -467,7 +468,9 @@ export async function getRoster(league: LeagueId, teamId: string): Promise<Roste
       jersey: a.jersey,
       headshot: a.headshot?.href,
       unavailable,
+      injury: injury && { status: injury.status!, date: injury.date },
     });
+  };
   for (const entry of data.athletes) {
     if ("items" in entry) {
       // NFL: grouped as offense / defense / specialTeam / injuredReserveOrOut / practiceSquad ...
@@ -562,7 +565,7 @@ export async function getPlayerGameLog(league: LeagueId, athleteId: string, seas
         const teamId = event.homeTeamId === event.opponent?.id ? event.awayTeamId : event.homeTeamId;
         const stats: Record<string, number> = {};
         names.forEach((name, i) => {
-          if (keys[name]) stats[keys[name]] = toNumber(e.stats[i]);
+          if (keys[name]) stats[keys[name]] = statNumber(e.stats[i]);
         });
         games.push({ id: e.eventId, date, teamId: teamId ?? "", stats });
       }

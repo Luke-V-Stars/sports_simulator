@@ -203,14 +203,16 @@ function playNfl(input: MatchupInput, rng: Rng): GameResult {
 }
 
 // Exactly one quarterback plays: the highest one on the depth chart who's
-// healthy, or the stand-in backup if none is.
+// healthy. The stand-in (a quarterback with no recent stats, always healthy)
+// plays if none is, or if he's listed higher, like a rookie's first start.
 function nflLineup(side: SideInput, rng: Rng): boolean[] {
   const active = sampleLineup(side, rng);
   const players = side.players;
   const available = players.map((_, i) => i).filter((i) => active[i] && isQuarterback(players[i]));
   let qb = players.findIndex((p) => p.replacement);
-  if (available.length > 0) {
-    const top = Math.min(...available.map((i) => players[i].depth ?? 99));
+  const standInDepth = qb >= 0 ? (players[qb].depth ?? 99) : 99;
+  const top = Math.min(99, ...available.map((i) => players[i].depth ?? 99));
+  if (available.length > 0 && top <= standInDepth) {
     const best = available.filter((i) => (players[i].depth ?? 99) === top);
     // Not on the depth chart: favor whoever usually throws the most.
     qb = best[pickWeighted(rng, best.map((i) => (players[i].avg.passAtt ?? 1) ** 2))];

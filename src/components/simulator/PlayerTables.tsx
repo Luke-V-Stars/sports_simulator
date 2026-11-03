@@ -69,7 +69,13 @@ export function PlayerTables({ league, players, actual }: Props) {
                           <span className="font-medium">{p.name}</span>
                           <span className="text-xs text-muted">{p.position}</span>
                           {p.injury && <InjuryBadge status={p.injury.status} />}
-                          {p.replacement && <span className="text-xs text-muted">(fills in if the starter sits)</span>}
+                          {p.replacement && (
+                            <span className="text-xs text-muted">
+                              {p.playPct >= 0.5
+                                ? "(no recent stats: typical numbers for this team)"
+                                : "(fills in if the starter sits)"}
+                            </span>
+                          )}
                           {p.returning && (
                             <span
                               className="text-xs text-muted"

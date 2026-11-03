@@ -97,6 +97,9 @@ After a change, run `npm test`, then check the **Accuracy** page (100+ games) to
   `src/lib/espn.ts` is the only file that should need fixing.
 - Weather uses a small table of outdoor stadium locations in `src/lib/weather.ts`. A new stadium (say, a new
   international game) just gets no weather until it's added there.
+- Injuries come from each team's roster (ESPN's game pages list only 5 per team). ESPN keeps only each
+  player's latest injury news, so for a game already played the site uses today's report minus anything
+  updated after kickoff; injuries that healed since then can't be seen.
 - The accuracy report's first load can take a minute or two while it downloads box scores; after that it's
   quick.
 - Data is reused for a short time instead of being downloaded on every click: live scoreboards for 30

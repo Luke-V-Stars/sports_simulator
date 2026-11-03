@@ -23,7 +23,8 @@ const NFL_EXTRA_REST = 1; // 12+ days, usually a bye week
 // passes suffer), up to the cap. Heavy rain or snow and real cold cost a bit.
 const WIND_POINTS_PER_MPH = -0.15;
 const WIND_CAP = -3;
-const WET_POINTS = -0.75; // 1+ mm of rain or snow per hour
+export const WET_MM_PER_HOUR = 1; // this much rain or snow per hour (or more)...
+const WET_POINTS = -0.75; // ...costs this much
 const COLD_POINTS = -0.5; // below 25°F
 
 export interface SideAdjustments {
@@ -72,7 +73,7 @@ export function weatherAdjustments(weather: GameWeather | undefined): Adjustment
   const result: Adjustment[] = [];
   const wind = Math.max(WIND_CAP, WIND_POINTS_PER_MPH * Math.max(0, weather.windMph - 10));
   if (wind < 0) result.push({ label: `Wind (${Math.round(weather.windMph)} mph)`, points: wind });
-  if (weather.precipMm >= 1) result.push({ label: "Rain or snow", points: WET_POINTS });
+  if (weather.precipMm >= WET_MM_PER_HOUR) result.push({ label: "Rain or snow", points: WET_POINTS });
   if (weather.tempF < 25) result.push({ label: `Cold (${Math.round(weather.tempF)}°F)`, points: COLD_POINTS });
   return result;
 }

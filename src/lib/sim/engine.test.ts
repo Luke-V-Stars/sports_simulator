@@ -74,6 +74,14 @@ describe("NFL quarterbacks", () => {
     expect([...qbsPerGame]).toEqual([1]);
   });
 
+  it("starts a stand-in listed above the others (a rookie's first start)", () => {
+    const rookie = { ...standIn, depth: 1 };
+    const { rate, qbsPerGame } = playRate(matchup("nfl", [qb("vet", 2), rookie, rb, wr]));
+    expect(rate("standin")).toBe(1);
+    expect(rate("vet")).toBe(0);
+    expect([...qbsPerGame]).toEqual([1]);
+  });
+
   it("splits a questionable starter's games with the backup", () => {
     const { rate } = playRate(matchup("nfl", [qb("qb1", 1, { playProb: 0.5 }), qb("qb2", 2), standIn, rb, wr]));
     expect(rate("qb1")).toBeCloseTo(0.5, 1);

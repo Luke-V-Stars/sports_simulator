@@ -55,7 +55,19 @@ export function Simulator({ input, vegas, actual }: Props) {
     return () => clearTimeout(id);
   }, [simulate]);
 
-  const playOne = () => setSingleGames((prev) => [playOneGame(input, newSeed()), ...prev].slice(0, 100));
+  // Only the last 100 games are kept, but the win tally counts every one.
+  const [record, setRecord] = useState({ home: 0, away: 0, ties: 0 });
+  const playOne = () => {
+    const game = playOneGame(input, newSeed());
+    setSingleGames((prev) => [game, ...prev].slice(0, 100));
+    setRecord((r) =>
+      game.tie
+        ? { ...r, ties: r.ties + 1 }
+        : game.homeScore > game.awayScore
+          ? { ...r, home: r.home + 1 }
+          : { ...r, away: r.away + 1 },
+    );
+  };
 
   const home = input.home.team;
   const away = input.away.team;
@@ -181,6 +193,7 @@ export function Simulator({ input, vegas, actual }: Props) {
               <SingleGamePanel
                 league={input.league}
                 games={singleGames}
+                record={record}
                 homeAbbr={home.abbr}
                 awayAbbr={away.abbr}
                 onPlay={playOne}

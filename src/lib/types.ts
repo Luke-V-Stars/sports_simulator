@@ -68,6 +68,7 @@ export interface Injury {
   position?: string;
   status: string; // "Out", "Questionable", ...
   detail?: string; // "Hamstring"
+  date?: string; // when ESPN last updated it
 }
 
 export interface RosterPlayer {
@@ -78,6 +79,9 @@ export interface RosterPlayer {
   headshot?: string;
   // NFL rosters put injured-reserve players in their own group.
   unavailable?: boolean;
+  // His current injury status, if any. (Game pages only list 5 per team;
+  // the roster has everyone.)
+  injury?: { status: string; date?: string };
 }
 
 // One player's line from one game's box score. Stat keys match

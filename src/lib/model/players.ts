@@ -55,6 +55,53 @@ export function playChance(status: string): number {
   return 0.75;
 }
 
+// The injury report as it stood at kickoff. ESPN's game page lists only the
+// 5 most recently updated injuries per team, and always today's report (even
+// for an old game), so:
+//   - everyone's status comes from the team roster, which lists them all
+//     (the game page's list adds details like "Hamstring"),
+//   - anything ESPN updated after kickoff is left out: for a finished game
+//     that news wasn't known yet, and an injured-reserve player whose status
+//     changed after kickoff counts as available.
+// ESPN only keeps the latest update, so this is the closest free match: a
+// player hurt before the game whose status changed afterwards is missed.
+export function injuriesAtKickoff(
+  roster: RosterPlayer[],
+  reported: Injury[], // from the game page
+  kickoff: string,
+): { roster: RosterPlayer[]; injuries: Injury[] } {
+  const start = Date.parse(kickoff);
+  const time = (date?: string) => (date ? Date.parse(date) : NaN);
+  const knownAtKickoff = (date?: string) => !(time(date) >= start); // no date: assume known
+
+  const byId = new Map(reported.map((i) => [i.playerId, i]));
+  for (const r of roster) {
+    if (!r.injury) continue;
+    const listed = byId.get(r.id);
+    if (listed && time(listed.date) >= time(r.injury.date)) continue; // the game page is as new
+    byId.set(r.id, {
+      playerId: r.id,
+      name: r.name,
+      position: r.position,
+      status: r.injury.status,
+      detail: listed?.detail,
+      date: r.injury.date,
+    });
+  }
+
+  const ir = (i: Injury) => (/injured reserve/i.test(i.status) ? 1 : 0);
+  const injuries = [...byId.values()]
+    .filter((i) => knownAtKickoff(i.date))
+    // Game-day statuses first, then injured reserve; newest news first.
+    .sort((a, b) => ir(a) - ir(b) || (time(b.date) || 0) - (time(a.date) || 0));
+  return {
+    roster: roster.map((r) =>
+      r.unavailable && r.injury && !knownAtKickoff(r.injury.date) ? { ...r, unavailable: false } : r,
+    ),
+    injuries,
+  };
+}
+
 export function buildSide(args: {
   league: LeagueId;
   team: Team;
@@ -301,7 +348,9 @@ function importance(league: LeagueId, p: PlayerInput): number {
   return (p.avg.passAtt ?? 0) * 100 + (p.avg.rushYds ?? 0) + (p.avg.recYds ?? 0);
 }
 
-// The simulator needs someone to throw passes if the starting QB is out.
+// A quarterback with no recent stats, from the roster: the highest healthy
+// one on the depth chart. He throws if every QB with stats is out, and starts
+// if he's listed above them (a rookie's first start). The engine decides.
 function backupQuarterback(
   team: Team,
   roster: RosterPlayer[],
