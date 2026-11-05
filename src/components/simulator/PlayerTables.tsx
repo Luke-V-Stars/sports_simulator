@@ -121,10 +121,12 @@ export function PlayerTables({ league, players, actual }: Props) {
           <span className="font-semibold">{inside} of {checked} </span>
           real stats ({pct(inside / checked)}) landed inside the projected range. If the ranges are about right, that
           should happen roughly 8 times in 10.
+          {league === "nfl" && " (Touchdowns and interceptions aren't counted: a range like 0–1 is almost always right.)"}
         </p>
       )}
       <p className="text-xs text-muted">
-        Big number = average when he plays. Small numbers = a quiet game to a big game (10th to 90th percentile).
+        Big number = average when he plays. Small numbers = a quiet game to a big game (10th to 90th percentile), based
+        on how much his own numbers swing.
         {actualById && (
           <>
             {" "}

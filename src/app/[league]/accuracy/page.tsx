@@ -71,6 +71,7 @@ async function AccuracyContent({
             <Calibration summary={summary} />
             <Explainer />
           </div>
+          <StatBreakdown league={league} summary={summary} />
           <GamesTable league={league} evals={evals} />
           <p className="text-xs text-muted">
             {summary.games} games{report.skipped > 0 ? ` (${report.skipped} skipped: ESPN data missing)` : ""}. Each
@@ -137,7 +138,7 @@ function Tiles({ summary }: { summary: AccuracySummary }) {
       <Tile
         title="Player stats inside the typical range"
         value={share(summary.playersInRange)}
-        detail={`${summary.playersInRange.hits.toLocaleString()} of ${summary.playersInRange.total.toLocaleString()} stats, for players shown on game pages who really played. Target about 80%.`}
+        detail={`${summary.playersInRange.hits.toLocaleString()} of ${summary.playersInRange.total.toLocaleString()} stats, for players shown on game pages who really played. Target about 80%. See the table below for each stat.`}
       />
       <Tile
         title="Win chance score (Brier)"
@@ -210,6 +211,58 @@ function Explainer() {
           numbers. Compare changes using 100+ games where possible.
         </li>
       </ul>
+    </section>
+  );
+}
+
+// Each stat on its own, because a good overall number can hide a weak stat.
+function StatBreakdown({ league, summary }: { league: LeagueId; summary: AccuracySummary }) {
+  const stats = LEAGUES[league].playerStats.filter((s) => summary.statsByKey[s.key]);
+  const hasRare = stats.some((s) => s.rare);
+  return (
+    <section className="overflow-x-auto rounded-xl border border-edge bg-surface p-4">
+      <h2 className="mb-1 font-semibold">Player stats, one by one</h2>
+      <p className="mb-3 max-w-3xl text-sm text-ink-2">
+        A wider range is easier to land in, so a good range score alone doesn&apos;t mean better predictions. Typical
+        miss is how far the projection usually is from what happened: lower is better. Check both after changing the
+        model.
+      </p>
+      <table className="tabular w-full min-w-[560px] text-sm">
+        <thead className="text-xs text-muted">
+          <tr className="border-b border-line">
+            <th className="py-1.5 text-left font-normal">Stat</th>
+            <th className="py-1.5 text-right font-normal">Checked</th>
+            <th className="py-1.5 text-right font-normal">Inside range</th>
+            <th className="py-1.5 text-right font-normal">Below</th>
+            <th className="py-1.5 text-right font-normal">Above</th>
+            <th className="py-1.5 text-right font-normal">Typical miss</th>
+          </tr>
+        </thead>
+        <tbody>
+          {stats.map((s) => {
+            const t = summary.statsByKey[s.key];
+            return (
+              <tr key={s.key} className="border-b border-line last:border-0">
+                <td className="py-1.5">
+                  {s.name}
+                  {s.rare ? " *" : ""}
+                </td>
+                <td className="py-1.5 text-right text-ink-2">{t.checked.toLocaleString()}</td>
+                <td className="py-1.5 text-right font-medium">{pct(t.inside / t.checked)}</td>
+                <td className="py-1.5 text-right text-ink-2">{pct(t.below / t.checked)}</td>
+                <td className="py-1.5 text-right text-ink-2">{pct(t.above / t.checked)}</td>
+                <td className="py-1.5 text-right">{fixed(t.missSum / t.checked, s.decimals === 0 ? 1 : 2)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {hasRare && (
+        <p className="mt-2 text-xs text-muted">
+          * Not counted in the overall score above. These are usually 0 or 1 in a game, so a range like 0–1 is right
+          almost regardless, and including them would flatter the model.
+        </p>
+      )}
     </section>
   );
 }

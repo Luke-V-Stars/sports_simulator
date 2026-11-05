@@ -9,6 +9,9 @@ export interface StatDef {
   label: string; // short column header, e.g. "PTS"
   name: string; // full name, e.g. "Points"
   decimals: number; // how many decimals to show for an average
+  // Usually 0 or 1 in a game, so a range like "0–1" is right almost regardless.
+  // Left out of the headline range score, where it would flatter the model.
+  rare?: boolean;
 }
 
 export interface LeagueConfig {
@@ -52,13 +55,13 @@ export const LEAGUES: Record<LeagueId, LeagueConfig> = {
     marginSpread: 13.4,
     playerStats: [
       { key: "passYds", label: "PASS YDS", name: "Passing yards", decimals: 0 },
-      { key: "passTd", label: "PASS TD", name: "Passing touchdowns", decimals: 1 },
-      { key: "int", label: "INT", name: "Interceptions thrown", decimals: 1 },
+      { key: "passTd", label: "PASS TD", name: "Passing touchdowns", decimals: 1, rare: true },
+      { key: "int", label: "INT", name: "Interceptions thrown", decimals: 1, rare: true },
       { key: "rushYds", label: "RUSH YDS", name: "Rushing yards", decimals: 0 },
-      { key: "rushTd", label: "RUSH TD", name: "Rushing touchdowns", decimals: 1 },
+      { key: "rushTd", label: "RUSH TD", name: "Rushing touchdowns", decimals: 1, rare: true },
       { key: "rec", label: "REC", name: "Receptions", decimals: 1 },
       { key: "recYds", label: "REC YDS", name: "Receiving yards", decimals: 0 },
-      { key: "recTd", label: "REC TD", name: "Receiving touchdowns", decimals: 1 },
+      { key: "recTd", label: "REC TD", name: "Receiving touchdowns", decimals: 1, rare: true },
     ],
   },
   nba: {

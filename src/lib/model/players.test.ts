@@ -4,6 +4,7 @@ import type { BoxScoreLine, Injury, RosterPlayer } from "../types";
 import {
   buildSide,
   injuriesAtKickoff,
+  playerSwing,
   playChance,
   RUST_WORKLOAD,
   type PlayerHistory,
@@ -96,6 +97,51 @@ describe("NBA bench roles", () => {
     const sample = sampleGames(10, (g) => (g < 5 ? [line("star", nba)] : []));
     const side = build("nba", { sample, roster: roster(["star"]) });
     expect(player(side, "star")?.rolePct).toBe(1);
+  });
+});
+
+describe("NBA deep-bench roles", () => {
+  const nba = { min: 8, pts: 3 };
+
+  it("counts games a non-regular was simply absent from", () => {
+    // Newest first: played 0, 2, 4 and absent from 1 and 3 since first appearing.
+    const sample = sampleGames(10, (g) => ([0, 2, 4].includes(g) ? [line("deep", nba)] : []));
+    const side = build("nba", { sample, roster: roster(["deep"]), depth: { deep: 3 } });
+    expect(player(side, "deep")?.rolePct).toBeCloseTo(3 / 5);
+  });
+
+  it("doesn't count absences against a regular (he was hurt)", () => {
+    const sample = sampleGames(10, (g) => ([0, 2, 4].includes(g) ? [line("reg", nba)] : []));
+    const side = build("nba", { sample, roster: roster(["reg"]), depth: { reg: 1 } });
+    expect(player(side, "reg")?.rolePct).toBe(1);
+  });
+});
+
+describe("playerSwing", () => {
+  const games = (...points: number[]) => points.map((pts) => ({ pts }));
+
+  it("makes small roles swing more, relative to their average, than big ones", () => {
+    const star = playerSwing("nba", { pts: 28 }, []).pts;
+    const bench = playerSwing("nba", { pts: 5 }, []).pts;
+    expect(bench).toBeGreaterThan(star);
+  });
+
+  it("rises for a streaky player and falls for a steady one with the same average", () => {
+    const steady = playerSwing("nba", { pts: 15 }, games(15, 15, 15, 15, 15, 15, 15, 15, 15, 15)).pts;
+    const streaky = playerSwing("nba", { pts: 15 }, games(0, 30, 0, 30, 0, 30, 0, 30, 0, 30)).pts;
+    const unknown = playerSwing("nba", { pts: 15 }, []).pts;
+    expect(steady).toBeLessThan(unknown);
+    expect(streaky).toBeGreaterThan(unknown);
+  });
+
+  it("ignores his own spread with only a couple of games", () => {
+    expect(playerSwing("nba", { pts: 15 }, games(0, 30))).toEqual(playerSwing("nba", { pts: 15 }, []));
+  });
+
+  it("stays within limits for a player with almost no production", () => {
+    const { blk } = playerSwing("nba", { blk: 0.01 }, []);
+    expect(blk).toBeGreaterThan(0);
+    expect(blk).toBeLessThanOrEqual(1.5);
   });
 });
 

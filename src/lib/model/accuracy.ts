@@ -5,7 +5,14 @@
 import { cacheLife } from "next/cache";
 import { mapLimit } from "../espn";
 import type { LeagueId } from "../leagues";
-import { checkGame, playersInRange, statTables, summarizeAccuracy, type GameEvaluation } from "../sim/compare";
+import {
+  checkGame,
+  combineRanges,
+  playersInRange,
+  statTables,
+  summarizeAccuracy,
+  type GameEvaluation,
+} from "../sim/compare";
 import { runSimulations } from "../sim/summary";
 import { getLeagueSnapshot } from "./league";
 import { getMatchup } from "./matchup";
@@ -51,10 +58,7 @@ async function evaluateGame(league: LeagueId, eventId: string): Promise<GameEval
     awayWinPct: summary.away.winPct,
     check: checkGame(summary, actual, game.home.team.abbr, vegas),
     vegasFavorite,
-    players: {
-      inside: players[0].inside + players[1].inside,
-      checked: players[0].checked + players[1].checked,
-    },
+    players: combineRanges(players),
   };
 }
 

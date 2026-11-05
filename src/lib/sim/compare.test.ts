@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { summarizeAccuracy, type GameEvaluation, type ValueCheck } from "./compare";
+import { playersInRange, statTables, summarizeAccuracy, type GameEvaluation, type ValueCheck } from "./compare";
+import type { PlayerProjection } from "./summary";
 
 function value(projected: number, actual: number, low = projected - 10, high = projected + 10): ValueCheck {
   return { projected, low, high, actual, miss: Math.abs(projected - actual), range: actual < low ? "below" : actual > high ? "above" : "inside" };
@@ -29,9 +30,51 @@ function evaluation(homeWin: number, home: number, away: number, vegas?: { margi
       vegasTotalMiss: vegas && Math.abs(vegas.total - (home + away)),
     },
     vegasFavorite: vegas ? (vegas.margin > 0 ? "home" : "away") : undefined,
-    players: { inside: 8, checked: 10 },
+    players: {
+      inside: 8,
+      checked: 10,
+      byStat: { pts: { checked: 10, inside: 8, below: 1, above: 1, missSum: 30 } },
+    },
   };
 }
+
+describe("playersInRange", () => {
+  const stat = (mean: number, low: number, high: number) => ({ mean, low, high });
+  const receiver: PlayerProjection = {
+    id: "wr",
+    name: "wr",
+    out: false,
+    playPct: 1,
+    stats: {
+      passYds: stat(0, 0, 0),
+      passTd: stat(0, 0, 0),
+      int: stat(0, 0, 0),
+      rushYds: stat(0, 0, 0),
+      rushTd: stat(0, 0, 0),
+      rec: stat(5, 3, 7),
+      recYds: stat(60, 30, 90),
+      recTd: stat(0.4, 0, 1),
+    },
+  };
+  const box = (stats: Record<string, number>) => [{ playerId: "wr", name: "wr", stats }];
+  const check = (stats: Record<string, number>) => playersInRange(statTables("nfl", [receiver]), box(stats));
+
+  it("leaves touchdowns out of the headline but keeps them in the per-stat counts", () => {
+    const result = check({ rec: 5, recYds: 60, recTd: 1 });
+    expect(result).toMatchObject({ inside: 2, checked: 2 });
+    expect(result.byStat.recTd.inside).toBe(1);
+  });
+
+  it("records the direction and size of a miss", () => {
+    const { byStat } = check({ rec: 2, recYds: 100, recTd: 0 });
+    expect(byStat.rec).toEqual({ checked: 1, inside: 0, below: 1, above: 0, missSum: 3 });
+    expect(byStat.recYds).toEqual({ checked: 1, inside: 0, below: 0, above: 1, missSum: 40 });
+  });
+
+  it("skips players who aren't in the real box score", () => {
+    expect(playersInRange(statTables("nfl", [receiver]), []).checked).toBe(0);
+  });
+});
 
 describe("summarizeAccuracy", () => {
   const evals = [
@@ -64,6 +107,7 @@ describe("summarizeAccuracy", () => {
   it("adds up range checks", () => {
     expect(s.playersInRange).toEqual({ hits: 32, total: 40 });
     expect(s.scoresInRange.total).toBe(8);
+    expect(s.statsByKey.pts).toEqual({ checked: 40, inside: 32, below: 4, above: 4, missSum: 120 });
   });
 
   it("leaves ties out of picks", () => {

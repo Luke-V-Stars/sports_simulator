@@ -52,7 +52,8 @@ Other commands:
    difference counts: a star who sits lowers the expected score, one back after weeks out raises it.
 5. **Play it out:** NBA scores get bell-curve randomness. NFL games are played as ~11 possessions per team
    that end in touchdowns, field goals or nothing. Team totals (leaning toward what the opponent's defense
-   usually allows) are then split among the players who played, based on their recent share.
+   usually allows) are then split among the players who played, in whole numbers, based on their recent share
+   and how much their own numbers swing. A sitting player's role goes mostly to players at his position.
 6. **Repeat** thousands of times and count the results.
 
 The site's own **How it works** page explains this in more detail.
@@ -89,7 +90,8 @@ src/
 Good first things to tweak: the numbers in `src/lib/leagues.ts` (e.g. `homeAdvantage`), the injury
 play chances in `playChance()` and the returning-player workload `RUST_WORKLOAD` in
 `src/lib/model/players.ts`, or the rest and weather sizes at the top of `src/lib/model/conditions.ts`.
-After a change, run `npm test`, then check the **Accuracy** page (100+ games) to see whether it helped.
+After a change, run `npm test`, then check the **Accuracy** page (100+ games) to see whether it helped. Check
+both the range score and the typical miss: widening ranges raises the first without improving the second.
 
 ## Good to know
 

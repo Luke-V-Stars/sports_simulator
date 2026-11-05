@@ -62,9 +62,12 @@ export default function HowItWorks() {
           scores like 24–17 show up far more often than 23–18.
         </p>
         <p className="mt-2">
-          Then each team&apos;s points, yards, rebounds and assists are split among the players who played, based on
-          their share over the last 8 (NFL) or 10 (NBA) games, with some randomness so a role player can have a big
-          night. The team totals lean toward what the opponent&apos;s defense usually allows: against a defense that
+          Then each team&apos;s points, yards, rebounds and assists are split among the players who played, in whole
+          numbers like a real box score, based on their share over the last 8 (NFL) or 10 (NBA) games. How much a
+          player&apos;s numbers swing from game to game comes from his own recent games, blended with what&apos;s
+          typical for a player his size: a bench scorer swings more, relative to his average, than a star. When
+          someone sits, most of his role goes to players at his position, unless he has been out long enough that
+          their averages already include it. The team totals lean toward what the opponent&apos;s defense usually allows: against a defense that
           gives up lots of passing yards, an NFL team throws a bit more and runs a bit less (total yards stay tied to
           the score); against a team that gives up lots of rebounds, an NBA team grabs a few more. The lean is pulled
           halfway to average and capped at about 15%.

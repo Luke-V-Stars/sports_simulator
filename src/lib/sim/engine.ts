@@ -8,7 +8,9 @@
 //      player who sits, up for one back after the team played without him,
 //   3. produces a final score with realistic randomness,
 //   4. splits the team's points, yards, rebounds, etc. among the players who
-//      played, based on each player's recent share.
+//      played, based on each player's recent share and how much his own numbers
+//      swing, in whole numbers like a real box score. When someone sits, most of
+//      his role goes to players at his position.
 
 import { LEAGUES } from "../leagues";
 import { normal, pickWeighted, poisson, wobble, type Rng } from "./random";
@@ -55,8 +57,79 @@ function lineupAdjustment(side: SideInput, active: boolean[], cap: number): numb
   return Math.max(-cap, Math.min(cap, points));
 }
 
-// Splits `total` among active players in proportion to their average for
-// `key`, each multiplied by `factor(i)` (today's random hot/cold factor).
+// Who takes over when a player sits: this share of his role goes to players
+// at his position (a backup running back gets the carries), and the rest
+// spreads across the whole team.
+const SAME_POSITION_SHARE = 0.6;
+
+function positionGroup(position: string | undefined): string | undefined {
+  switch (position) {
+    case "RB":
+    case "FB":
+      return "backs";
+    case "WR":
+    case "TE":
+      return "receivers";
+    case "PG":
+    case "SG":
+    case "G":
+      return "guards";
+    case "SF":
+    case "F":
+      return "wings";
+    case "PF":
+    case "C":
+      return "bigs";
+    default:
+      return undefined; // quarterbacks are picked separately
+  }
+}
+
+// Each active player's usual amount of `key`, plus what he takes over from
+// teammates at his position who are sitting.
+function roleWeights(players: PlayerInput[], active: boolean[], key: string): Float64Array {
+  const base = new Float64Array(players.length);
+  for (let i = 0; i < players.length; i++) {
+    if (active[i]) base[i] = Math.max(0, players[i].avg[key] ?? 0);
+  }
+  const weights = Float64Array.from(base);
+  for (let j = 0; j < players.length; j++) {
+    if (active[j]) continue;
+    const vacated = SAME_POSITION_SHARE * Math.max(0, players[j].avg[key] ?? 0) * players[j].sampleShare;
+    const group = positionGroup(players[j].position);
+    if (vacated <= 0 || !group) continue;
+    let groupTotal = 0;
+    for (let i = 0; i < players.length; i++) {
+      if (positionGroup(players[i].position) === group) groupTotal += base[i];
+    }
+    if (groupTotal <= 0) continue;
+    for (let i = 0; i < players.length; i++) {
+      if (positionGroup(players[i].position) === group) weights[i] += (vacated * base[i]) / groupTotal;
+    }
+  }
+  return weights;
+}
+
+// The most one player gets in a game, about what the record books allow, so
+// a rare extreme random draw can't produce an impossible stat line.
+const STAT_CAP: Record<string, number> = {
+  min: 48, // plus any overtime
+  pts: 70,
+  reb: 30,
+  ast: 22,
+  fg3: 14,
+  stl: 9,
+  blk: 10,
+  passYds: 550,
+  rushYds: 280,
+  rec: 18,
+  recYds: 310,
+};
+
+// Splits `total` among active players by role, each multiplied by `factor(i)`
+// (today's random hot/cold factor), and limits each to `cap`, with the excess
+// going to teammates. Then makes whole numbers: walking through a running total
+// keeps each player's average right and the team's sum intact.
 function distribute(
   players: PlayerInput[],
   active: boolean[],
@@ -66,25 +139,56 @@ function distribute(
   out: Float64Array,
   statIndex: number,
   statCount: number,
+  rng: Rng,
+  cap: number = STAT_CAP[key],
 ): void {
-  const weights = new Float64Array(players.length);
+  const weights = roleWeights(players, active, key);
   let sum = 0;
   for (let i = 0; i < players.length; i++) {
-    if (!active[i]) continue;
-    weights[i] = Math.max(0, players[i].avg[key] ?? 0) * factor(i);
+    if (weights[i] > 0) weights[i] *= factor(i);
     sum += weights[i];
   }
   if (sum <= 0) return;
-  for (let i = 0; i < players.length; i++) {
-    if (weights[i] > 0) out[i * statCount + statIndex] = (total * weights[i]) / sum;
+  for (let i = 0; i < players.length; i++) weights[i] *= total / sum;
+  // Each pass limits at least one more player, so this always finishes.
+  for (let pass = 0; pass <= players.length; pass++) {
+    let excess = 0;
+    let room = 0;
+    for (let i = 0; i < players.length; i++) {
+      if (weights[i] > cap) {
+        excess += weights[i] - cap;
+        weights[i] = cap;
+      } else if (weights[i] < cap) {
+        room += weights[i];
+      }
+    }
+    if (excess <= 0 || room <= 0) break;
+    for (let i = 0; i < players.length; i++) {
+      if (weights[i] < cap) weights[i] *= 1 + excess / room;
+    }
   }
+  let running = rng();
+  let handedOut = 0;
+  for (let i = 0; i < players.length; i++) {
+    running += weights[i];
+    const upTo = Math.floor(running);
+    out[i * statCount + statIndex] = upTo - handedOut;
+    handedOut = upTo;
+  }
+}
+
+// What a stat's swing still needs after an effect that already moved it (a
+// player's minutes move his points too). Swings add up like squares.
+function remainingSwing(total: number, already: number): number {
+  return Math.sqrt(Math.max(0, total * total - already * already));
 }
 
 // ---------- NBA ----------
 
 const NBA_KEYS = LEAGUES.nba.playerStats.map((s) => s.key);
-// How much each player's share of a stat swings from game to game.
-const NBA_SWING: Record<string, number> = { min: 0, pts: 0.3, reb: 0.3, ast: 0.35, fg3: 0.5, stl: 0.6, blk: 0.6 };
+// How much a player's stat swings from game to game, if we have no figure of
+// his own (see PlayerInput.swing).
+const NBA_SWING: Record<string, number> = { min: 0.25, pts: 0.45, reb: 0.55, ast: 0.65, fg3: 0.9, stl: 1, blk: 1.2 };
 
 function playNba(input: MatchupInput, rng: Rng): GameResult {
   const homeLineup = sampleLineup(input.home, rng);
@@ -141,10 +245,15 @@ function nbaBox(
     stl: usual("stl") * extraTime * wobble(rng, 0.2),
     blk: usual("blk") * extraTime * wobble(rng, 0.25),
   };
-  // How big each player's role is tonight (foul trouble, hot hand...).
-  const role = side.players.map((_, i) => (active[i] ? wobble(rng, 0.12) : 0));
+  // How big each player's role is tonight (foul trouble, hot hand...): his
+  // minutes, which move all his other stats too.
+  const swing = (i: number, key: string) => side.players[i].swing[key] ?? NBA_SWING[key];
+  const role = side.players.map((_, i) => (active[i] ? wobble(rng, swing(i, "min")) : 0));
   NBA_KEYS.forEach((key, s) => {
-    distribute(side.players, active, key, totals[key], (i) => role[i] * wobble(rng, NBA_SWING[key]), stats, s, statCount);
+    const factor = (i: number) =>
+      key === "min" ? role[i] : role[i] * wobble(rng, remainingSwing(swing(i, key), swing(i, "min")));
+    const cap = key === "min" ? STAT_CAP.min * extraTime : STAT_CAP[key];
+    distribute(side.players, active, key, totals[key], factor, stats, s, statCount, rng, cap);
   });
   return { score: points, active, stats, touchdowns: 0, fieldGoals: 0 };
 }
@@ -157,6 +266,11 @@ const NFL_INDEX = Object.fromEntries(NFL_KEYS.map((k, i) => [k, i]));
 const BASE_TD_RATE = 0.22;
 const BASE_FG_RATE = 0.15;
 const POINTS_PER_DRIVE = BASE_TD_RATE * 6.98 + BASE_FG_RATE * 3;
+// How much a player's stat swings from game to game, if we have no figure of
+// his own (see PlayerInput.swing), and how much of a quarterback's swing comes
+// from his team simply scoring more or less.
+const NFL_SWING: Record<string, number> = { passYds: 0.3, rushYds: 0.8, rec: 0.6, recYds: 0.7 };
+const SCORING_SWING = 0.17;
 
 function isQuarterback(p: PlayerInput): boolean {
   const attempts = p.avg.passAtt ?? 0;
@@ -259,22 +373,27 @@ function nflBox(side: SideInput, active: boolean[], drive: DriveResult, rng: Rng
 
   // Scoring more than usual usually means more yards too.
   const flow = Math.sqrt((drive.points + 7) / (side.avgPoints + 7));
-  const passYards = usual("passYds") * flow * wobble(rng, 0.18);
-  const rushYards = usual("rushYds") * flow * wobble(rng, 0.25);
-  const receptions = usual("rec") * Math.sqrt(flow) * wobble(rng, 0.12);
+  const swing = (i: number, key: string) => players[i].swing[key] ?? NFL_SWING[key];
 
   // nflLineup left exactly one quarterback active.
   const qb = players.findIndex((p, i) => active[i] && isQuarterback(p));
+  const passSwing = remainingSwing(qb >= 0 ? swing(qb, "passYds") : NFL_SWING.passYds, SCORING_SWING);
+  const passYards = Math.round(Math.min(STAT_CAP.passYds, usual("passYds") * flow * wobble(rng, passSwing)));
+  const rushYards = Math.round(usual("rushYds") * flow * wobble(rng, 0.25));
+  const receptions = usual("rec") * Math.sqrt(flow) * wobble(rng, 0.12);
   if (qb >= 0) {
     set(qb, "passYds", passYards);
     set(qb, "int", poisson(rng, usual("int", 0.8) * wobble(rng, 0.3)));
   }
 
-  // Receivers: each gets a "target share" for the day.
-  const targetShare = players.map((_, i) => (active[i] ? wobble(rng, 0.45) : 0));
-  distribute(players, active, "recYds", passYards, (i) => targetShare[i], stats, NFL_INDEX.recYds, statCount);
-  distribute(players, active, "rec", receptions, (i) => targetShare[i], stats, NFL_INDEX.rec, statCount);
-  distribute(players, active, "rushYds", rushYards, () => wobble(rng, 0.4), stats, NFL_INDEX.rushYds, statCount);
+  // Receivers: each gets a "target share" for the day, which moves both his
+  // catches and his yards; his yards per catch swing on top of that.
+  const targetShare = players.map((_, i) => (active[i] ? wobble(rng, swing(i, "rec")) : 0));
+  const yardsFactor = (i: number) => targetShare[i] * wobble(rng, remainingSwing(swing(i, "recYds"), swing(i, "rec")));
+  distribute(players, active, "recYds", passYards, yardsFactor, stats, NFL_INDEX.recYds, statCount, rng);
+  distribute(players, active, "rec", receptions, (i) => targetShare[i], stats, NFL_INDEX.rec, statCount, rng);
+  const rushFactor = (i: number) => wobble(rng, swing(i, "rushYds"));
+  distribute(players, active, "rushYds", rushYards, rushFactor, stats, NFL_INDEX.rushYds, statCount, rng);
 
   // Hand out each touchdown: a pass (QB + a receiver) or a run.
   for (let t = 0; t < drive.touchdowns; t++) {
@@ -282,13 +401,15 @@ function nflBox(side: SideInput, active: boolean[], drive: DriveResult, rng: Rng
       add(qb, "passTd");
       const receiver = pickWeighted(
         rng,
-        players.map((p, i) => (active[i] ? ((p.avg.recTd ?? 0) + (p.avg.recYds ?? 0) / 150) * targetShare[i] : 0)),
+        players.map((p, i) =>
+          active[i] ? (p.avg.recTd ?? 0) * targetShare[i] + stats[i * statCount + NFL_INDEX.recYds] / 150 : 0,
+        ),
       );
       if (receiver >= 0) add(receiver, "recTd");
     } else {
       const runner = pickWeighted(
         rng,
-        players.map((p, i) => (active[i] ? (p.avg.rushTd ?? 0) + Math.max(0, p.avg.rushYds ?? 0) / 100 : 0)),
+        players.map((p, i) => (active[i] ? (p.avg.rushTd ?? 0) + stats[i * statCount + NFL_INDEX.rushYds] / 100 : 0)),
       );
       if (runner >= 0) add(runner, "rushTd");
     }

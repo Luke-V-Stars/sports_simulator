@@ -223,34 +223,16 @@ export interface BoxLine {
   stats: Record<string, number>;
 }
 
-// Rounds to whole numbers while keeping the total the same, so players'
-// points still add up to the team's score.
-function roundKeepingTotal(values: number[]): number[] {
-  const target = Math.round(values.reduce((a, b) => a + b, 0));
-  const rounded = values.map(Math.floor);
-  let missing = target - rounded.reduce((a, b) => a + b, 0);
-  const byRemainder = values.map((v, i) => ({ i, rest: v - Math.floor(v) })).sort((a, b) => b.rest - a.rest);
-  for (const { i } of byRemainder) {
-    if (missing <= 0) break;
-    rounded[i]++;
-    missing--;
-  }
-  return rounded;
-}
-
 export function playOneGame(input: MatchupInput, seed: number): SingleGame {
   const game: GameResult = playGame(input, makeRng(seed));
   const statKeys = LEAGUES[input.league].playerStats.map((s) => s.key);
   const lines = (side: SideInput, result: SideResult): BoxLine[] => {
     const playing = side.players.map((p, i) => ({ p, i })).filter(({ i }) => result.active[i]);
-    const columns = statKeys.map((_, s) =>
-      roundKeepingTotal(playing.map(({ i }) => result.stats[i * statKeys.length + s])),
-    );
-    return playing.map(({ p }, row) => ({
+    return playing.map(({ p, i }) => ({
       id: p.id,
       name: p.name,
       position: p.position,
-      stats: Object.fromEntries(statKeys.map((key, s) => [key, columns[s][row]])),
+      stats: Object.fromEntries(statKeys.map((key, s) => [key, result.stats[i * statKeys.length + s]])),
     }));
   };
   const nfl = input.league === "nfl";

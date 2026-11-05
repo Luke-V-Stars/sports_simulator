@@ -30,6 +30,14 @@ export interface PlayerInput {
   // share of the team's rated games he played. Playing adds the rest of his
   // impact; sitting takes this share away.
   ratedShare: number;
+  // Share of the team's recent sampled games he played (0-1). When he sits, only
+  // this much of his role is really up for grabs: if he's been out for weeks,
+  // the others' averages already include what they took over.
+  sampleShare: number;
+  // How much each of his stats swings from game to game, as the size of a
+  // random multiplier (see wobble). Measured from his own games; a stat that's
+  // missing uses a general figure.
+  swing: Record<string, number>;
   // NFL only: a stand-in "backup QB" used when no quarterback is available.
   replacement?: boolean;
 }

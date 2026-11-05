@@ -7,7 +7,7 @@ import type { MatchupInput, PlayerInput, SideInput } from "./types";
 // ---------- Helpers to build small, made-up matchups ----------
 
 function p(id: string, overrides: Partial<PlayerInput> = {}): PlayerInput {
-  return { id, name: id, playProb: 1, rolePct: 1, gamesPlayed: 8, avg: {}, impact: 0, ratedShare: 1, ...overrides };
+  return { id, name: id, playProb: 1, rolePct: 1, gamesPlayed: 8, avg: {}, swing: {}, impact: 0, ratedShare: 1, sampleShare: 1, ...overrides };
 }
 
 const qb = (id: string, depth: number, extra: Partial<PlayerInput> = {}) =>
@@ -98,6 +98,79 @@ describe("who plays", () => {
     expect(rate("a")).toBe(1);
   });
 
+});
+
+describe("player stat lines", () => {
+  const nbaPlayer = (id: string, position: string, min: number, pts: number, extra: Partial<PlayerInput> = {}) =>
+    p(id, { position, avg: { min, pts, reb: 4, ast: 3, fg3: 1, stl: 1, blk: 0.5 }, ...extra });
+  const team = () => [
+    nbaPlayer("pg", "PG", 34, 22),
+    nbaPlayer("sg", "SG", 30, 15),
+    nbaPlayer("sf", "SF", 32, 14),
+    nbaPlayer("pf", "PF", 30, 12),
+    nbaPlayer("c", "C", 28, 12),
+    nbaPlayer("g2", "SG", 20, 8),
+    nbaPlayer("f2", "SF", 18, 6),
+    nbaPlayer("c2", "C", 16, 5),
+  ];
+  const playMany = (players: PlayerInput[], runs = 3000) => {
+    const input = matchup("nba", players);
+    const rng = makeRng(11);
+    return Array.from({ length: runs }, () => playGame(input, rng));
+  };
+
+  it("are whole numbers, and points add up to the team's score", () => {
+    for (const game of playMany(team(), 500)) {
+      expect(game.home.stats.every(Number.isInteger)).toBe(true);
+      let points = 0;
+      for (let i = 0; i < game.home.active.length; i++) points += game.home.stats[i * 7 + 1];
+      expect(points).toBe(game.home.score);
+    }
+  });
+
+  it("swing more for a player with a bigger measured swing", () => {
+    const players = team();
+    players[5] = { ...players[5], swing: { pts: 1 } };
+    players[6] = { ...players[6], swing: { pts: 0.1 }, avg: { ...players[6].avg, pts: 8 } };
+    const spread = (i: number) => {
+      const values = playMany(players).map((g) => g.home.stats[i * 7 + 1]);
+      const mean = values.reduce((a, b) => a + b, 0) / values.length;
+      return Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length);
+    };
+    expect(spread(5)).toBeGreaterThan(spread(6) * 1.3);
+  });
+
+  it("never go past a realistic limit, even with huge swings", () => {
+    const wild = team().map((pl) => ({ ...pl, swing: { min: 1.5, pts: 1.5 } }));
+    for (const game of playMany(wild, 2000)) {
+      const extraTime = 1 + (game.overtimes * 5) / 48;
+      for (let i = 0; i < wild.length; i++) {
+        expect(game.home.stats[i * 7]).toBeLessThanOrEqual(Math.ceil(48 * extraTime));
+        expect(game.home.stats[i * 7 + 1]).toBeLessThanOrEqual(71);
+      }
+    }
+  });
+
+  const avgStat = (players: PlayerInput[], i: number, s: number) => {
+    const games = playMany(players);
+    return games.reduce((sum, g) => sum + g.home.stats[i * 7 + s], 0) / games.length;
+  };
+
+  it("give a sitting player's minutes mostly to his position", () => {
+    const players = team();
+    const starterOut = players.map((pl) => (pl.id === "c" ? { ...pl, playProb: 0 } : pl));
+    const backupGain = avgStat(starterOut, 7, 0) / avgStat(players, 7, 0); // the backup center
+    const guardGain = avgStat(starterOut, 5, 0) / avgStat(players, 5, 0); // a backup guard
+    expect(backupGain).toBeGreaterThan(guardGain * 1.2);
+  });
+
+  it("don't shift anything for a player who's been out for weeks", () => {
+    // The others' averages already include what they took over.
+    const players = team();
+    const longOut = players.map((pl) => (pl.id === "c" ? { ...pl, playProb: 0, sampleShare: 0 } : pl));
+    const recentOut = players.map((pl) => (pl.id === "c" ? { ...pl, playProb: 0, sampleShare: 1 } : pl));
+    expect(avgStat(recentOut, 7, 0)).toBeGreaterThan(avgStat(longOut, 7, 0) * 1.1);
+  });
 });
 
 describe("expected points follow the lineup", () => {

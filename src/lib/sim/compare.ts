@@ -103,23 +103,66 @@ export function statTables(league: LeagueId, players: PlayerProjection[]) {
   }));
 }
 
+// How one stat did across the players checked.
+export interface StatTally {
+  checked: number;
+  inside: number;
+  below: number;
+  above: number;
+  missSum: number; // total distance from the projection; missSum / checked = typical miss
+}
+
+export interface RangeSummary {
+  inside: number; // the headline: leaves out rare stats (see StatDef.rare)
+  checked: number;
+  byStat: Record<string, StatTally>; // every stat
+}
+
+const RARE_STATS = new Set(
+  Object.values(LEAGUES).flatMap((league) => league.playerStats.filter((s) => s.rare).map((s) => s.key)),
+);
+
 // How many of the shown stats landed inside the projected range, for players
 // who are in the real box score.
-export function playersInRange(tables: ReturnType<typeof statTables>, actual: BoxScoreLine[]) {
+export function playersInRange(tables: ReturnType<typeof statTables>, actual: BoxScoreLine[]): RangeSummary {
   const byId = new Map(actual.map((line) => [line.playerId, line]));
-  let inside = 0;
-  let checked = 0;
+  const result: RangeSummary = { inside: 0, checked: 0, byStat: {} };
   for (const { group, rows } of tables) {
     for (const p of rows) {
       const line = byId.get(p.id);
       if (!line) continue;
       for (const key of group.keys) {
-        checked++;
-        if (checkRange(line.stats[key] ?? 0, p.stats[key].low, p.stats[key].high) === "inside") inside++;
+        const real = line.stats[key] ?? 0;
+        const range = checkRange(real, p.stats[key].low, p.stats[key].high);
+        const tally = (result.byStat[key] ??= { checked: 0, inside: 0, below: 0, above: 0, missSum: 0 });
+        tally.checked++;
+        tally[range]++;
+        tally.missSum += Math.abs(real - p.stats[key].mean);
+        if (RARE_STATS.has(key)) continue;
+        result.checked++;
+        if (range === "inside") result.inside++;
       }
     }
   }
-  return { inside, checked };
+  return result;
+}
+
+// Adds range summaries together (both teams, or a whole season of games).
+export function combineRanges(summaries: RangeSummary[]): RangeSummary {
+  const total: RangeSummary = { inside: 0, checked: 0, byStat: {} };
+  for (const s of summaries) {
+    total.inside += s.inside;
+    total.checked += s.checked;
+    for (const [key, t] of Object.entries(s.byStat)) {
+      const sum = (total.byStat[key] ??= { checked: 0, inside: 0, below: 0, above: 0, missSum: 0 });
+      sum.checked += t.checked;
+      sum.inside += t.inside;
+      sum.below += t.below;
+      sum.above += t.above;
+      sum.missSum += t.missSum;
+    }
+  }
+  return total;
 }
 
 // ---------- Season accuracy report ----------
@@ -134,7 +177,7 @@ export interface GameEvaluation {
   awayWinPct: number;
   check: GameCheck;
   vegasFavorite?: "home" | "away"; // undefined if no line or a pick'em
-  players: { inside: number; checked: number };
+  players: RangeSummary;
 }
 
 export interface Tally {
@@ -160,7 +203,8 @@ export interface AccuracySummary {
   brier: number; // average (chance - result)^2; always saying 50% scores 0.25
   calibration: CalibrationBin[];
   scoresInRange: Tally; // team scores inside the 10th-90th percentile range
-  playersInRange: Tally;
+  playersInRange: Tally; // leaves out rare stats (see StatDef.rare)
+  statsByKey: Record<string, StatTally>; // every stat
 }
 
 const BINS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0001];
@@ -171,6 +215,7 @@ export function summarizeAccuracy(evals: GameEvaluation[]): AccuracySummary {
   const withSpread = evals.filter((e) => e.check.vegasMarginMiss !== undefined);
   const withTotal = evals.filter((e) => e.check.vegasTotalMiss !== undefined);
   const withFavorite = decided.filter((e) => e.vegasFavorite);
+  const players = combineRanges(evals.map((e) => e.players));
 
   const calibration = BINS.slice(0, -1).map((from, i) => {
     const inBin = decided.filter((e) => {
@@ -210,9 +255,7 @@ export function summarizeAccuracy(evals: GameEvaluation[]): AccuracySummary {
       hits: evals.reduce((n, e) => n + (e.check.home.range === "inside" ? 1 : 0) + (e.check.away.range === "inside" ? 1 : 0), 0),
       total: evals.length * 2,
     },
-    playersInRange: {
-      hits: evals.reduce((n, e) => n + e.players.inside, 0),
-      total: evals.reduce((n, e) => n + e.players.checked, 0),
-    },
+    playersInRange: { hits: players.inside, total: players.checked },
+    statsByKey: players.byStat,
   };
 }

@@ -42,6 +42,58 @@ export function isRegular(league: LeagueId, position: string | undefined, depth:
   return depth === 1 || (position === "RB" && depth === 2);
 }
 
+// How much a stat typically swings from game to game for its size: standard
+// deviation = this number x the square root of the player's average. Measured
+// across 400 games of each league in November 2026 (spreads grow more slowly
+// than averages, so a 30-point scorer is steadier, relative to his average,
+// than a 5-point one). A player's own games only say so much in 8-10 games, so
+// these anchor his figure.
+const TYPICAL_SWING: Record<LeagueId, Record<string, number>> = {
+  nba: { min: 1.6, pts: 1.89, reb: 1.21, ast: 1.14, fg3: 1.07, stl: 1.02, blk: 0.94 },
+  nfl: { passYds: 6.7, rushYds: 4, rec: 1.04, recYds: 4.4 },
+};
+const MAX_SWING = 1.5; // keeps the odd outlier from producing absurd games
+// The simulator splits a fixed team total among teammates, which dampens each
+// player's swing (a big game for one player partly just takes from the others),
+// and whole numbers add some. These cancel that out, tuned so the ranges cover
+// about 80% of real results across this season's finished games.
+const SWING_STRETCH: Record<string, number> = {
+  min: 1.15,
+  pts: 1.35,
+  reb: 1.05,
+  fg3: 0.8,
+  stl: 0.7,
+  blk: 0.7,
+  rushYds: 1.9,
+  recYds: 1.8,
+  rec: 1.05,
+};
+
+// A player's swing for each stat: his own spread (counting for up to half)
+// blended with what's typical for his size, turned into the sigma wobble() uses.
+export function playerSwing(
+  league: LeagueId,
+  avg: Record<string, number>,
+  games: Record<string, number>[],
+): Record<string, number> {
+  const swing: Record<string, number> = {};
+  for (const [key, typicalFactor] of Object.entries(TYPICAL_SWING[league])) {
+    const average = Math.max(avg[key] ?? 0, 0.25);
+    const typical = typicalFactor * Math.sqrt(average);
+    const values = games.map((g) => g[key] ?? 0);
+    let spread = typical;
+    if (values.length >= 3) {
+      const mean = values.reduce((a, b) => a + b, 0) / values.length;
+      const own = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / (values.length - 1));
+      const trust = Math.min(1, values.length / 10) * 0.5;
+      spread = trust * own + (1 - trust) * typical;
+    }
+    const relative = (spread / average) * (SWING_STRETCH[key] ?? 1);
+    swing[key] = Math.min(MAX_SWING, Math.sqrt(Math.log(1 + relative * relative)));
+  }
+  return swing;
+}
+
 // How likely a player is to play, given his injury status.
 export function playChance(status: string): number {
   const s = status.toLowerCase();
@@ -123,7 +175,7 @@ export function buildSide(args: {
   const teamSums: Record<string, number> = {};
   const players = new Map<
     string,
-    { line: BoxScoreLine; weight: number; games: number[]; sums: Record<string, number> }
+    { line: BoxScoreLine; weight: number; games: number[]; sums: Record<string, number>; lines: Record<string, number>[] }
   >();
   let pointSum = 0;
   sample.forEach((game, g) => {
@@ -131,11 +183,12 @@ export function buildSide(args: {
     for (const line of game.lines) {
       let p = players.get(line.playerId);
       if (!p) {
-        p = { line, weight: 0, games: [], sums: {} };
+        p = { line, weight: 0, games: [], sums: {}, lines: [] };
         players.set(line.playerId, p);
       }
       p.weight += game.weight;
       p.games.push(g);
+      p.lines.push(line.stats);
       for (const [key, value] of Object.entries(line.stats)) {
         p.sums[key] = (p.sums[key] ?? 0) + game.weight * value;
         teamSums[key] = (teamSums[key] ?? 0) + game.weight * value;
@@ -164,11 +217,12 @@ export function buildSide(args: {
     let p = players.get(id);
     if (!p) {
       const line = { playerId: id, name: r.name, position: r.position, headshot: r.headshot, stats: {} };
-      p = { line, weight: 0, games: [], sums: {} };
+      p = { line, weight: 0, games: [], sums: {}, lines: [] };
       players.set(id, p);
     }
     for (const game of h.extra) {
       p.weight += game.weight;
+      p.lines.push(game.stats);
       for (const [key, value] of Object.entries(game.stats)) {
         p.sums[key] = (p.sums[key] ?? 0) + game.weight * value;
       }
@@ -182,6 +236,7 @@ export function buildSide(args: {
     const avg: Record<string, number> = {};
     for (const [key, sum] of Object.entries(p.sums)) avg[key] = sum / p.weight;
     if (!isRelevant(league, avg)) continue;
+    const swing = playerSwing(league, avg, p.lines);
 
     // Back from a long absence: expect a lighter workload at first.
     const back = history[id] && gamesBack(league, history[id].played, teamGames, gameDate);
@@ -206,8 +261,10 @@ export function buildSide(args: {
       injury: injury ? { status: injury.status, detail: injury.detail } : undefined,
       gamesPlayed: p.games.length + (history[id]?.extra.length ?? 0),
       avg,
+      swing,
       impact: playerImpact(league, avg, teamAvg),
       ratedShare: ratedShare(team.id, sample, p.games, history[id], teamGames),
+      sampleShare: sample.length ? p.games.length / sample.length : 0,
     });
   }
 
@@ -241,8 +298,10 @@ export function buildSide(args: {
 // How often a healthy player gets into the game. His averages only count the
 // games he played, so without this a backup who had one big game would be
 // treated like an every-game player.
-//   NBA: games played vs. games the coach kept him on the bench. Games he
-//        missed injured don't count against him.
+//   NBA: games played vs. games the coach kept him on the bench. Games a
+//        regular (see isRegular) missed don't count against him: he was hurt.
+//        Anyone else also counts games he was simply absent from since he first
+//        appeared, since deep-bench players are often left out of the box score.
 //   NFL: box scores don't say why someone is missing, so regulars (see
 //        isRegular) and quarterbacks (picked by depth chart in the engine) count as every
 //        game. Everyone else: share of games since his first one in the sample,
@@ -259,7 +318,13 @@ function rolePct(
   const played = games.reduce((sum, g) => sum + sample[g].weight, 0);
   if (league === "nba") {
     const benched = sample.reduce((sum, g) => sum + (g.benched.includes(id) ? g.weight : 0), 0);
-    return played / (played + benched);
+    if (isRegular(league, position, depth)) return played / (played + benched);
+    const firstGame = Math.max(...games);
+    const possible = sample.reduce(
+      (sum, g, i) => sum + (i <= firstGame || g.benched.includes(id) ? g.weight : 0),
+      0,
+    );
+    return played / possible;
   }
   if (isRegular(league, position, depth) || position === "QB") return 1;
   const firstGame = Math.max(...games);
@@ -375,6 +440,8 @@ function backupQuarterback(
     playProb: 1,
     rolePct: 1,
     ratedShare: 0,
+    sampleShare: 0,
+    swing: {},
     depth: backup && depth[backup.id],
     gamesPlayed: 0,
     avg: { passAtt: 30, int: teamAvg.int ?? 0.8, rushYds: 5 },
