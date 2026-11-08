@@ -59,9 +59,11 @@ export const LEAGUES: Record<LeagueId, LeagueConfig> = {
       { key: "int", label: "INT", name: "Interceptions thrown", decimals: 1, rare: true },
       { key: "rushYds", label: "RUSH YDS", name: "Rushing yards", decimals: 0 },
       { key: "rushTd", label: "RUSH TD", name: "Rushing touchdowns", decimals: 1, rare: true },
+      { key: "rushLng", label: "LONG", name: "Longest run", decimals: 0 },
       { key: "rec", label: "REC", name: "Receptions", decimals: 1 },
       { key: "recYds", label: "REC YDS", name: "Receiving yards", decimals: 0 },
       { key: "recTd", label: "REC TD", name: "Receiving touchdowns", decimals: 1, rare: true },
+      { key: "recLng", label: "LONG", name: "Longest catch", decimals: 0 },
     ],
   },
   nba: {

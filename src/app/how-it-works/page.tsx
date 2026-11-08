@@ -67,7 +67,9 @@ export default function HowItWorks() {
           player&apos;s numbers swing from game to game comes from his own recent games, blended with what&apos;s
           typical for a player his size: a bench scorer swings more, relative to his average, than a star. When
           someone sits, most of his role goes to players at his position, unless he has been out long enough that
-          their averages already include it. The team totals lean toward what the opponent&apos;s defense usually allows: against a defense that
+          their averages already include it. For the NFL&apos;s longest run and longest catch, each player&apos;s
+          yards are split into his carries and catches the way real games go (a few big plays and many short
+          ones, catches more evenly than runs), and the biggest one counts. The team totals lean toward what the opponent&apos;s defense usually allows: against a defense that
           gives up lots of passing yards, an NFL team throws a bit more and runs a bit less (total yards stay tied to
           the score); against a team that gives up lots of rebounds, an NBA team grabs a few more. The lean is pulled
           halfway to average and capped at about 15%.

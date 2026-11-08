@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LeagueId } from "../leagues";
+import { LEAGUES, type LeagueId } from "../leagues";
 import { playGame } from "./engine";
 import { makeRng } from "./random";
 import type { MatchupInput, PlayerInput, SideInput } from "./types";
@@ -170,6 +170,51 @@ describe("player stat lines", () => {
     const longOut = players.map((pl) => (pl.id === "c" ? { ...pl, playProb: 0, sampleShare: 0 } : pl));
     const recentOut = players.map((pl) => (pl.id === "c" ? { ...pl, playProb: 0, sampleShare: 1 } : pl));
     expect(avgStat(recentOut, 7, 0)).toBeGreaterThan(avgStat(longOut, 7, 0) * 1.1);
+  });
+});
+
+describe("NFL stat lines", () => {
+  const nflTeam = [
+    qb("qb1", 1),
+    standIn,
+    p("rb1", { position: "RB", avg: { rushAtt: 16, rushYds: 70, rushTd: 0.5, rec: 2, recYds: 15 } }),
+    p("rb2", { position: "RB", avg: { rushAtt: 8, rushYds: 35, rushTd: 0.2, rec: 1, recYds: 8 } }),
+    p("wr1", { position: "WR", avg: { rec: 6, recYds: 80, recTd: 0.5 } }),
+    p("wr2", { position: "WR", avg: { rec: 4, recYds: 50, recTd: 0.3 } }),
+    p("te1", { position: "TE", avg: { rec: 4, recYds: 40, recTd: 0.3 } }),
+  ];
+  const keys = LEAGUES.nfl.playerStats.map((s) => s.key);
+  const stat = (side: { stats: Float64Array }, i: number, key: string) => side.stats[i * keys.length + keys.indexOf(key)];
+
+  it("never have receiving yards without a catch, or a longest play bigger than the total", () => {
+    const input = matchup("nfl", nflTeam);
+    const rng = makeRng(21);
+    for (let r = 0; r < 2000; r++) {
+      const { home } = playGame(input, rng);
+      nflTeam.forEach((_, i) => {
+        const v = (key: string) => stat(home, i, key);
+        if (v("recYds") !== 0) expect(v("rec")).toBeGreaterThan(0);
+        expect(v("recLng")).toBeLessThanOrEqual(Math.max(0, v("recYds")));
+        expect(v("rushLng")).toBeLessThanOrEqual(Math.max(0, v("rushYds")));
+        // The longest of several plays is at least their average.
+        if (v("rec") > 0 && v("recYds") > 0) expect(v("recLng")).toBeGreaterThanOrEqual(Math.floor(v("recYds") / v("rec")));
+      });
+    }
+  });
+
+  it("gives a longest run that's a sizable share of a runner's yards", () => {
+    const input = matchup("nfl", nflTeam);
+    const rng = makeRng(22);
+    let longest = 0;
+    let yards = 0;
+    for (let r = 0; r < 2000; r++) {
+      const { home } = playGame(input, rng);
+      longest += stat(home, 2, "rushLng");
+      yards += stat(home, 2, "rushYds");
+    }
+    // Real lead backs: the longest run is typically 15-30% of the day's yards.
+    expect(longest / yards).toBeGreaterThan(0.15);
+    expect(longest / yards).toBeLessThan(0.4);
   });
 });
 

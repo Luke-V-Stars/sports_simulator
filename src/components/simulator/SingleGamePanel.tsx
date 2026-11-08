@@ -131,6 +131,7 @@ function TeamBox({
   const rushers = lines.filter((l) => l.stats.rushYds > 0).sort((a, b) => b.stats.rushYds - a.stats.rushYds).slice(0, 2);
   const receivers = lines.filter((l) => l.stats.recYds > 0).sort((a, b) => b.stats.recYds - a.stats.recYds).slice(0, 3);
   const td = (n: number) => (n ? `, ${n} TD` : "");
+  const long = (n: number) => (n > 0 ? `, long ${n}` : "");
   return (
     <div className="flex flex-col gap-1 text-sm">
       <h4 className="font-semibold">{abbr}</h4>
@@ -150,13 +151,17 @@ function TeamBox({
       {rushers.length > 0 && (
         <p>
           <span className="text-muted">Rushing: </span>
-          {rushers.map((r) => `${r.name} ${r.stats.rushYds} yds${td(r.stats.rushTd)}`).join(" · ")}
+          {rushers
+            .map((r) => `${r.name} ${r.stats.rushYds} yds${td(r.stats.rushTd)}${long(r.stats.rushLng)}`)
+            .join(" · ")}
         </p>
       )}
       {receivers.length > 0 && (
         <p>
           <span className="text-muted">Receiving: </span>
-          {receivers.map((r) => `${r.name} ${r.stats.rec}-${r.stats.recYds}${td(r.stats.recTd)}`).join(" · ")}
+          {receivers
+            .map((r) => `${r.name} ${r.stats.rec}-${r.stats.recYds}${td(r.stats.recTd)}${long(r.stats.recLng)}`)
+            .join(" · ")}
         </p>
       )}
     </div>

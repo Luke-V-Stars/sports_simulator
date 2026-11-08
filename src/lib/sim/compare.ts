@@ -79,8 +79,13 @@ export interface StatGroup {
 const STAT_GROUPS: Record<LeagueId, StatGroup[]> = {
   nfl: [
     { title: "Passing", keys: ["passYds", "passTd", "int"], include: (p) => p.stats.passYds.mean >= 20, limit: 2 },
-    { title: "Rushing", keys: ["rushYds", "rushTd"], include: (p) => p.stats.rushYds.mean >= 3, limit: 5 },
-    { title: "Receiving", keys: ["rec", "recYds", "recTd"], include: (p) => p.stats.rec.mean >= 0.5, limit: 7 },
+    { title: "Rushing", keys: ["rushYds", "rushTd", "rushLng"], include: (p) => p.stats.rushYds.mean >= 3, limit: 5 },
+    {
+      title: "Receiving",
+      keys: ["rec", "recYds", "recTd", "recLng"],
+      include: (p) => p.stats.rec.mean >= 0.5,
+      limit: 7,
+    },
   ],
   nba: [
     {

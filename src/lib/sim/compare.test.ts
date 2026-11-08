@@ -51,17 +51,19 @@ describe("playersInRange", () => {
       int: stat(0, 0, 0),
       rushYds: stat(0, 0, 0),
       rushTd: stat(0, 0, 0),
+      rushLng: stat(0, 0, 0),
       rec: stat(5, 3, 7),
       recYds: stat(60, 30, 90),
       recTd: stat(0.4, 0, 1),
+      recLng: stat(22, 12, 38),
     },
   };
   const box = (stats: Record<string, number>) => [{ playerId: "wr", name: "wr", stats }];
   const check = (stats: Record<string, number>) => playersInRange(statTables("nfl", [receiver]), box(stats));
 
   it("leaves touchdowns out of the headline but keeps them in the per-stat counts", () => {
-    const result = check({ rec: 5, recYds: 60, recTd: 1 });
-    expect(result).toMatchObject({ inside: 2, checked: 2 });
+    const result = check({ rec: 5, recYds: 60, recTd: 1, recLng: 20 });
+    expect(result).toMatchObject({ inside: 3, checked: 3 });
     expect(result.byStat.recTd.inside).toBe(1);
   });
 

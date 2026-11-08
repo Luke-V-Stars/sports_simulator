@@ -416,11 +416,17 @@ function parseNflBox(categories: RawBoxCategory[]): BoxScoreLine[] {
       passTd: "passingTouchdowns",
       int: "interceptions",
     },
-    rushing: { rushAtt: "rushingAttempts", rushYds: "rushingYards", rushTd: "rushingTouchdowns" },
+    rushing: {
+      rushAtt: "rushingAttempts",
+      rushYds: "rushingYards",
+      rushTd: "rushingTouchdowns",
+      rushLng: "longRushing",
+    },
     receiving: {
       rec: "receptions",
       recYds: "receivingYards",
       recTd: "receivingTouchdowns",
+      recLng: "longReception",
       tgt: "receivingTargets",
     },
   };
@@ -521,9 +527,11 @@ const GAME_LOG_KEYS: Record<LeagueId, Record<string, string>> = {
     rushingAttempts: "rushAtt",
     rushingYards: "rushYds",
     rushingTouchdowns: "rushTd",
+    longRushing: "rushLng",
     receptions: "rec",
     receivingYards: "recYds",
     receivingTouchdowns: "recTd",
+    longReception: "recLng",
     receivingTargets: "tgt",
   },
   nba: {

@@ -126,7 +126,7 @@ const STAT_CAP: Record<string, number> = {
   recYds: 310,
 };
 
-// Splits `total` among active players by role, each multiplied by `factor(i)`
+// Splits `total` among active players by role (or by `base`, if given), each multiplied by `factor(i)`
 // (today's random hot/cold factor), and limits each to `cap`, with the excess
 // going to teammates. Then makes whole numbers: walking through a running total
 // keeps each player's average right and the team's sum intact.
@@ -141,8 +141,9 @@ function distribute(
   statCount: number,
   rng: Rng,
   cap: number = STAT_CAP[key],
+  base?: Float64Array,
 ): void {
-  const weights = roleWeights(players, active, key);
+  const weights = base ?? roleWeights(players, active, key);
   let sum = 0;
   for (let i = 0; i < players.length; i++) {
     if (weights[i] > 0) weights[i] *= factor(i);
@@ -271,6 +272,29 @@ const POINTS_PER_DRIVE = BASE_TD_RATE * 6.98 + BASE_FG_RATE * 3;
 // from his team simply scoring more or less.
 const NFL_SWING: Record<string, number> = { passYds: 0.3, rushYds: 0.8, rec: 0.6, recYds: 0.7 };
 const SCORING_SWING = 0.17;
+// How lopsided a player's carries and catches are: each play's share of his
+// yards is drawn as (random)^shape, so a higher shape means a few big plays
+// and many short ones. Runs are lopsided, catches more even. First fitted to
+// 400 real games' longest plays (given each player's real carries, catches and
+// yards), then nudged so the ranges cover about 80% of this season's games.
+const RUN_SHAPE = 1.3;
+const CATCH_SHAPE = 0.7;
+const CARRIES_SWING = 0.35; // carries for the same yards vary from game to game
+// For a player whose own figure we don't know.
+const YARDS_PER_CARRY = 4.3;
+const YARDS_PER_CATCH = 10.5;
+
+// The longest of `plays` plays that together gained `yards`.
+function longestPlay(rng: Rng, plays: number, yards: number, shape: number): number {
+  let sum = 0;
+  let longest = 0;
+  for (let k = 0; k < plays; k++) {
+    const size = Math.pow(-Math.log(1 - rng()), shape);
+    sum += size;
+    if (size > longest) longest = size;
+  }
+  return sum > 0 ? Math.round((yards * longest) / sum) : Math.round(yards / plays);
+}
 
 function isQuarterback(p: PlayerInput): boolean {
   const attempts = p.avg.passAtt ?? 0;
@@ -386,14 +410,36 @@ function nflBox(side: SideInput, active: boolean[], drive: DriveResult, rng: Rng
     set(qb, "int", poisson(rng, usual("int", 0.8) * wobble(rng, 0.3)));
   }
 
-  // Receivers: each gets a "target share" for the day, which moves both his
-  // catches and his yards; his yards per catch swing on top of that.
+  // Receivers: each gets a "target share" for the day, which sets his
+  // catches. The passing yards then go out per catch, by each player's usual
+  // yards per catch with a swing of their own (so no yards without a catch).
   const targetShare = players.map((_, i) => (active[i] ? wobble(rng, swing(i, "rec")) : 0));
-  const yardsFactor = (i: number) => targetShare[i] * wobble(rng, remainingSwing(swing(i, "recYds"), swing(i, "rec")));
-  distribute(players, active, "recYds", passYards, yardsFactor, stats, NFL_INDEX.recYds, statCount, rng);
   distribute(players, active, "rec", receptions, (i) => targetShare[i], stats, NFL_INDEX.rec, statCount, rng);
+  const catchYards = players.map((p, i) => {
+    const catches = stats[i * statCount + NFL_INDEX.rec];
+    const { rec = 0, recYds = 0 } = p.avg;
+    const perCatch = rec > 0 && recYds > 0 ? Math.min(25, Math.max(3, recYds / rec)) : YARDS_PER_CATCH;
+    return catches * perCatch;
+  });
+  const yardsFactor = (i: number) => wobble(rng, remainingSwing(swing(i, "recYds"), swing(i, "rec")));
+  distribute(players, active, "recYds", passYards, yardsFactor, stats, NFL_INDEX.recYds, statCount, rng, undefined, Float64Array.from(catchYards));
   const rushFactor = (i: number) => wobble(rng, swing(i, "rushYds"));
   distribute(players, active, "rushYds", rushYards, rushFactor, stats, NFL_INDEX.rushYds, statCount, rng);
+
+  // Longest run and catch: split each player's yards into his carries (from
+  // his usual yards per carry) and catches, and keep the biggest play.
+  for (let i = 0; i < players.length; i++) {
+    if (!active[i]) continue;
+    const at = (key: string) => stats[i * statCount + NFL_INDEX[key]];
+    const runYards = at("rushYds");
+    if (runYards > 0) {
+      const { rushYds = 0, rushAtt = 0 } = players[i].avg;
+      const perCarry = rushAtt > 0 && rushYds > 0 ? Math.min(10, Math.max(2, rushYds / rushAtt)) : YARDS_PER_CARRY;
+      const carries = Math.max(1, Math.round((runYards / perCarry) * wobble(rng, CARRIES_SWING)));
+      set(i, "rushLng", longestPlay(rng, carries, runYards, RUN_SHAPE));
+    }
+    if (at("rec") > 0 && at("recYds") > 0) set(i, "recLng", longestPlay(rng, at("rec"), at("recYds"), CATCH_SHAPE));
+  }
 
   // Hand out each touchdown: a pass (QB + a receiver) or a run.
   for (let t = 0; t < drive.touchdowns; t++) {

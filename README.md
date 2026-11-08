@@ -54,6 +54,7 @@ Other commands:
    that end in touchdowns, field goals or nothing. Team totals (leaning toward what the opponent's defense
    usually allows) are then split among the players who played, in whole numbers, based on their recent share
    and how much their own numbers swing. A sitting player's role goes mostly to players at his position.
+   NFL longest run and longest catch come from splitting a player's yards into his carries and catches.
 6. **Repeat** thousands of times and count the results.
 
 The site's own **How it works** page explains this in more detail.
